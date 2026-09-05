@@ -20,6 +20,7 @@ export const employees = crudRouter({
             'schedule_id', 'employee_type', 'status', 'bank_account', 'join_date'],
   listSql: EMP_SQL,
   itemSql: EMP_SQL,
+  idColumn: 'e.id',
   filters: { department_id: 'e.department_id', status: 'e.status', employee_type: 'e.employee_type' },
   searchCol: 'e.name',
   orderBy: 'e.name ASC',
