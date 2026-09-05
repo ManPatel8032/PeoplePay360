@@ -19,7 +19,7 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const { data: structures } = useApi(() => api.get('/structures'), []);
+  const { data: structures, error: structError } = useApi(() => api.get('/structures'), []);
   const { data: departments } = useApi(() => api.get('/departments'), []);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -87,6 +87,11 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
   return (
     <Modal title="New Payrun Wizard" onClose={onClose} width={720}>
       {error && <Alert level="error"><span>{error}</span></Alert>}
+      {structError && (
+        <Alert level="warning">
+          <span>{structError.message}. Switch your role in the top-right corner to <strong>Arjun Patel (Payroll Manager)</strong> or <strong>Ishita Banerjee (Payroll Officer)</strong>.</span>
+        </Alert>
+      )}
 
       {step === 1 && (
         <>
@@ -99,7 +104,7 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
               <Field label="Salary Structure *">
                 <select className="select" value={form.structure_id} onChange={set('structure_id')}>
                   <option value="">Select structure…</option>
-                  {(structures || []).filter((s) => s.active).map((s) => (
+                  {(structures || []).filter((s) => s.active !== false).map((s) => (
                     <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                   ))}
                 </select>
