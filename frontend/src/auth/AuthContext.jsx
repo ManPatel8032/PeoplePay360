@@ -83,18 +83,107 @@ export function AuthProvider({ children }) {
     setUser((u) => (u ? { ...u, must_change_password: false } : u));
   }, []);
 
-  /** Can the current role read this module? Drives the nav. */
-  const canRead = useCallback((module) => {
-    const ROLES = ['employee', 'hr_manager', 'payroll_user', 'payroll_manager', 'admin'];
-    const need = permissions?.[module]?.read;
-    if (!need || !user) return false;
-    return ROLES.indexOf(user.role) >= ROLES.indexOf(need);
+  /** Capability check per module and action: returns 'all' | 'own' | 'none' */
+  const can = useCallback((module, action = 'read') => {
+    if (!user) return 'none';
+    const serverPerm = permissions?.[module]?.[action];
+    if (serverPerm && typeof serverPerm === 'string' && ['all', 'own', 'none'].includes(serverPerm)) {
+      return serverPerm;
+    }
+    const roleMatrix = ROLE_PERMISSIONS[user.role];
+    if (roleMatrix?.[module]?.[action]) {
+      return roleMatrix[module][action];
+    }
+    return 'none';
   }, [permissions, user]);
 
+  /** Can the current role read this module? Drives the nav. */
+  const canRead = useCallback((module) => {
+    return can(module, 'read') !== 'none';
+  }, [can]);
+
   const value = useMemo(
-    () => ({ user, permissions, booting, login, register, logout, changePassword, canRead }),
-    [user, permissions, booting, login, register, logout, changePassword, canRead]
+    () => ({ user, permissions, booting, login, register, logout, changePassword, canRead, can }),
+    [user, permissions, booting, login, register, logout, changePassword, canRead, can]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+
+export const ROLE_PERMISSIONS = {
+  employee: {
+    employees:       { read: 'own',  write: 'none' },
+    contracts:       { read: 'own',  write: 'none' },
+    schedules:       { read: 'all',  write: 'none' },
+    attendance:      { read: 'own',  write: 'own'  },
+    timeoff:         { read: 'own',  write: 'own'  },
+    timeoff_approve: { read: 'none', write: 'none' },
+    allocations:     { read: 'own',  write: 'none' },
+    payruns:         { read: 'none', write: 'none' },
+    payslips:        { read: 'own',  write: 'none' },
+    structures:      { read: 'none', write: 'none' },
+    rules:           { read: 'none', write: 'none' },
+    dashboard:       { read: 'none', write: 'none' },
+    users:           { read: 'none', write: 'none' },
+  },
+  hr_manager: {
+    employees:       { read: 'all',  write: 'all'  },
+    contracts:       { read: 'all',  write: 'all'  },
+    schedules:       { read: 'all',  write: 'all'  },
+    attendance:      { read: 'all',  write: 'all'  },
+    timeoff:         { read: 'all',  write: 'all'  },
+    timeoff_approve: { read: 'all',  write: 'all'  },
+    allocations:     { read: 'all',  write: 'all'  },
+    payruns:         { read: 'none', write: 'none' },
+    payslips:        { read: 'none', write: 'none' },
+    structures:      { read: 'none', write: 'none' },
+    rules:           { read: 'none', write: 'none' },
+    dashboard:       { read: 'none', write: 'none' },
+    users:           { read: 'none', write: 'none' },
+  },
+  payroll_user: {
+    employees:       { read: 'all',  write: 'all'  },
+    contracts:       { read: 'all',  write: 'all'  },
+    schedules:       { read: 'all',  write: 'all'  },
+    attendance:      { read: 'all',  write: 'all'  },
+    timeoff:         { read: 'all',  write: 'all'  },
+    timeoff_approve: { read: 'all',  write: 'all'  },
+    allocations:     { read: 'all',  write: 'all'  },
+    payruns:         { read: 'all',  write: 'all'  },
+    payslips:        { read: 'all',  write: 'all'  },
+    structures:      { read: 'all',  write: 'none' },
+    rules:           { read: 'all',  write: 'none' },
+    dashboard:       { read: 'all',  write: 'none' },
+    users:           { read: 'none', write: 'none' },
+  },
+  payroll_manager: {
+    employees:       { read: 'all',  write: 'all'  },
+    contracts:       { read: 'all',  write: 'all'  },
+    schedules:       { read: 'all',  write: 'all'  },
+    attendance:      { read: 'all',  write: 'all'  },
+    timeoff:         { read: 'all',  write: 'all'  },
+    timeoff_approve: { read: 'all',  write: 'all'  },
+    allocations:     { read: 'all',  write: 'all'  },
+    payruns:         { read: 'all',  write: 'all'  },
+    payslips:        { read: 'all',  write: 'all'  },
+    structures:      { read: 'all',  write: 'all'  },
+    rules:           { read: 'all',  write: 'all'  },
+    dashboard:       { read: 'all',  write: 'all'  },
+    users:           { read: 'none', write: 'none' },
+  },
+  admin: {
+    employees:       { read: 'all',  write: 'all'  },
+    contracts:       { read: 'all',  write: 'all'  },
+    schedules:       { read: 'all',  write: 'all'  },
+    attendance:      { read: 'all',  write: 'all'  },
+    timeoff:         { read: 'all',  write: 'all'  },
+    timeoff_approve: { read: 'all',  write: 'all'  },
+    allocations:     { read: 'all',  write: 'all'  },
+    payruns:         { read: 'all',  write: 'all'  },
+    payslips:        { read: 'all',  write: 'all'  },
+    structures:      { read: 'all',  write: 'all'  },
+    rules:           { read: 'all',  write: 'all'  },
+    dashboard:       { read: 'all',  write: 'all'  },
+    users:           { read: 'all',  write: 'all'  },
+  },
+};

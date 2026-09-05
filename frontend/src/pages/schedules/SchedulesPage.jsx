@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api.js';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -25,6 +26,9 @@ function calculateTotalWeeklyHours(lines) {
 }
 
 export default function SchedulesPage() {
+  const { user, can } = useAuth();
+  const canWrite = can('schedules', 'write') !== 'none';
+
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(null);
@@ -199,9 +203,11 @@ export default function SchedulesPage() {
           <button className="btn" onClick={() => navigate('/contracts')}>
             Contracts ➔
           </button>
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            + New Schedule
-          </button>
+          {canWrite && (
+            <button className="btn btn-primary" onClick={openCreateModal}>
+              + New Schedule
+            </button>
+          )}
         </div>
       </div>
 
@@ -214,11 +220,12 @@ export default function SchedulesPage() {
       {/* Schedule Edit / Create Modal */}
       {modalOpen && (
         <Modal
-          title={editingSchedule ? `Edit Schedule: ${editingSchedule.name}` : 'New Working Schedule'}
+          title={!canWrite ? `Schedule Details: ${editingSchedule?.name || ''}` : editingSchedule ? `Edit Schedule: ${editingSchedule.name}` : 'New Working Schedule'}
           onClose={() => setModalOpen(false)}
           width={700}
         >
           <form onSubmit={handleSave} style={{ display: 'grid', gap: 16 }}>
+            <fieldset disabled={!canWrite} style={{ border: 'none', padding: 0, margin: 0, display: 'grid', gap: 16 }}>
             {formError && <Alert level="error">{formError}</Alert>}
 
             <div className="grid grid-2">
@@ -380,13 +387,17 @@ export default function SchedulesPage() {
               )}
             </div>
 
+            </fieldset>
+
             <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
               <button type="button" className="btn" onClick={() => setModalOpen(false)}>
-                Cancel
+                {canWrite ? 'Cancel' : 'Close'}
               </button>
-              <button type="submit" className="btn btn-primary" disabled={saving || hasLineErrors}>
-                {saving ? 'Saving...' : editingSchedule ? 'Update Schedule' : 'Create Schedule'}
-              </button>
+              {canWrite && (
+                <button type="submit" className="btn btn-primary" disabled={saving || hasLineErrors}>
+                  {saving ? 'Saving...' : editingSchedule ? 'Update Schedule' : 'Create Schedule'}
+                </button>
+              )}
             </div>
           </form>
         </Modal>

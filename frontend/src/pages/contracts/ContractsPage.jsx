@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api, money } from '../../api.js';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -13,12 +14,17 @@ function isActiveToday(contract) {
 }
 
 export default function ContractsPage() {
+  const { user, can } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const isEmployee = user?.role === 'employee';
+  const canWrite = can('contracts', 'write') !== 'none';
+
   const employeeIdFilter = searchParams.get('employee_id') || '';
+  const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const stateFilter = searchParams.get('state') || '';
-  const [search, setSearch] = useState('');
+  const structureFilter = searchParams.get('structure_id') || '';
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingContract, setEditingContract] = useState(null);
@@ -30,21 +36,36 @@ export default function ContractsPage() {
   const employees = useApi(() => api.get('/employees'), []);
   const departments = useApi(() => api.get('/departments'), []);
   const positions = useApi(() => api.get('/positions'), []);
-  const structures = useApi(() => api.get('/structures'), []);
+  const structures = useApi(() => api.get('/contracts/structures'), []);
   const schedules = useApi(() => api.get('/schedules'), []);
 
   // Fetch contracts
   const { data: contracts, loading, error, reload } = useApi(
     () => {
       const q = new URLSearchParams();
-      if (employeeIdFilter) q.set('employee_id', employeeIdFilter);
+      if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       if (stateFilter) q.set('state', stateFilter);
-      if (search) q.set('search', search);
+      if (structureFilter) q.set('structure_id', structureFilter);
       const qs = q.toString();
       return api.get(`/contracts${qs ? '?' + qs : ''}`);
     },
-    [employeeIdFilter, stateFilter, search]
+    [effectiveEmpId, stateFilter, structureFilter]
   );
+
+  // Available structures for filtering & contract modal: from reference endpoint or derived from contracts
+  const structureOptions = useMemo(() => {
+    if (structures.data?.length) return structures.data;
+    if (contracts?.length) {
+      const map = new Map();
+      contracts.forEach((c) => {
+        if (c.structure_id && c.structure_name && !map.has(c.structure_id)) {
+          map.set(c.structure_id, { id: c.structure_id, name: c.structure_name, code: c.structure_code || '' });
+        }
+      });
+      return Array.from(map.values());
+    }
+    return [];
+  }, [structures.data, contracts]);
 
   // Form state
   const [form, setForm] = useState({
@@ -298,34 +319,38 @@ export default function ContractsPage() {
           <button className="btn" onClick={() => navigate('/schedules')}>
             Working Schedules ➔
           </button>
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            + New Contract
-          </button>
+          {canWrite && (
+            <button className="btn btn-primary" onClick={openCreateModal}>
+              + New Contract
+            </button>
+          )}
         </div>
       </div>
 
       <Card className="card" title="Filter Contracts">
-        <div className="grid grid-3">
-          <div className="field">
-            <label>Employee</label>
-            <select
-              className="select"
-              value={employeeIdFilter}
-              onChange={(e) => {
-                const next = new URLSearchParams(searchParams);
-                if (e.target.value) next.set('employee_id', e.target.value);
-                else next.delete('employee_id');
-                setSearchParams(next);
-              }}
-            >
-              <option value="">All Employees</option>
-              {(employees.data || []).map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className={!isEmployee ? "grid grid-3" : "grid grid-2"}>
+          {!isEmployee && (
+            <div className="field">
+              <label>Employee</label>
+              <select
+                className="select"
+                value={employeeIdFilter}
+                onChange={(e) => {
+                  const next = new URLSearchParams(searchParams);
+                  if (e.target.value) next.set('employee_id', e.target.value);
+                  else next.delete('employee_id');
+                  setSearchParams(next);
+                }}
+              >
+                <option value="">All Employees</option>
+                {(employees.data || []).map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="field">
             <label>Contract State</label>
@@ -348,24 +373,33 @@ export default function ContractsPage() {
           </div>
 
           <div className="field">
-            <label>Search</label>
-            <input
-              className="input"
-              type="text"
-              placeholder="Search by contract or employee name..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <label>Salary Structure</label>
+            <select
+              className="select"
+              value={structureFilter}
+              onChange={(e) => {
+                const next = new URLSearchParams(searchParams);
+                if (e.target.value) next.set('structure_id', e.target.value);
+                else next.delete('structure_id');
+                setSearchParams(next);
+              }}
+            >
+              <option value="">All Structures</option>
+              {structureOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {(employeeIdFilter || stateFilter || search) && (
+        {(employeeIdFilter || stateFilter || structureFilter) && (
           <div style={{ marginTop: 12 }}>
             <button
               className="btn btn-sm"
               onClick={() => {
                 setSearchParams({});
-                setSearch('');
               }}
             >
               Reset Filters
@@ -385,11 +419,12 @@ export default function ContractsPage() {
       {/* Contract Create / Edit Modal */}
       {modalOpen && (
         <Modal
-          title={editingContract ? `Edit Contract: ${editingContract.name}` : 'New Contract'}
+          title={!canWrite ? `Contract Details: ${editingContract?.name || ''}` : editingContract ? `Edit Contract: ${editingContract.name}` : 'New Contract'}
           onClose={() => setModalOpen(false)}
           width={640}
         >
           <form onSubmit={handleSave} style={{ display: 'grid', gap: 16 }}>
+            <fieldset disabled={!canWrite} style={{ border: 'none', padding: 0, margin: 0, display: 'grid', gap: 16 }}>
             {overlapWarning && (
               <Alert level="warning">
                 <strong>Concurrent-Contract Guard</strong>: {overlapWarning}
@@ -484,9 +519,9 @@ export default function ContractsPage() {
                   required={form.state === 'running'}
                 >
                   <option value="">Select Structure...</option>
-                  {(structures.data || []).map((s) => (
+                  {structureOptions.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} ({s.code})
+                      {s.name} {s.code ? `(${s.code})` : ''}
                     </option>
                   ))}
                 </select>
@@ -540,17 +575,21 @@ export default function ContractsPage() {
               </Field>
             </div>
 
+            </fieldset>
+
             <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
               <button type="button" className="btn" onClick={() => setModalOpen(false)}>
-                Cancel
+                {canWrite ? 'Cancel' : 'Close'}
               </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={saving || Boolean(overlapWarning)}
-              >
-                {saving ? 'Saving...' : editingContract ? 'Update Contract' : 'Create Contract'}
-              </button>
+              {canWrite && (
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={saving || Boolean(overlapWarning)}
+                >
+                  {saving ? 'Saving...' : editingContract ? 'Update Contract' : 'Create Contract'}
+                </button>
+              )}
             </div>
           </form>
         </Modal>
