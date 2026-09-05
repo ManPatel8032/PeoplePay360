@@ -4,6 +4,7 @@
  * Swap in real sessions later; every route already goes through `can()`.
  */
 import { one } from './db.js';
+import { verifyAccessToken } from './lib/tokens.js';
 
 export const ROLES = ['employee', 'hr_manager', 'payroll_user', 'payroll_manager', 'admin'];
 
@@ -28,10 +29,42 @@ const rank = (role) => ROLES.indexOf(role);
 
 export async function attachUser(req, _res, next) {
   try {
-    const id = Number(req.header('x-user-id')) || 0;
-    req.user =
-      (id && (await one('SELECT * FROM users WHERE id = $1', [id]))) ||
-      (await one('SELECT * FROM users ORDER BY id LIMIT 1'));
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7).trim();
+      const payload = verifyAccessToken(token);
+      if (payload?.id) {
+        const user = await one(
+          `SELECT id, name, email, role, employee_id, is_active, must_change_password
+             FROM users
+            WHERE id = $1 AND is_active = TRUE`,
+          [payload.id]
+        );
+        if (user) {
+          req.user = user;
+          return next();
+        }
+      }
+    }
+
+    // Dev/transitional fallback: support x-user-id header if present
+    if (process.env.NODE_ENV !== 'production') {
+      const id = Number(req.header('x-user-id')) || 0;
+      if (id) {
+        const user = await one(
+          `SELECT id, name, email, role, employee_id, is_active, must_change_password
+             FROM users
+            WHERE id = $1 AND is_active = TRUE`,
+          [id]
+        );
+        if (user) {
+          req.user = user;
+          return next();
+        }
+      }
+    }
+
+    req.user = null;
     next();
   } catch (err) {
     next(err);
@@ -42,6 +75,9 @@ export function can(module, action = 'read') {
   return (req, res, next) => {
     const need = MATRIX[module]?.[action];
     if (!need) return next();
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
     if (rank(req.user?.role) < rank(need)) {
       return res
         .status(403)
