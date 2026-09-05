@@ -201,6 +201,7 @@ export default function Dashboard() {
                     { key: 'net', label: 'Net paid', align: 'right', render: (r) => money(r.net) },
                   ]}
                   rows={data.by_department}
+                  paginated={false}
                 />
               </Card>
             </div>
@@ -223,6 +224,7 @@ export default function Dashboard() {
                     { id: 6, metric: 'Manual edits',      value: data.attendance.manual_edits },
                     { id: 7, metric: 'Average hours/day', value: data.attendance.avg_hours },
                   ]}
+                  paginated={false}
                 />
               </Card>
 
@@ -235,6 +237,7 @@ export default function Dashboard() {
                       render: (r) => r.pending ? <Badge value="pending" /> : '—' },
                   ]}
                   rows={data.time_off.by_type}
+                  paginated={false}
                 />
               </Card>
             </div>

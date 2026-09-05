@@ -2,7 +2,7 @@
  * Shared UI kit. Everyone builds pages out of these so the three tracks look
  * like one product. Add to this file rather than inventing local variants.
  */
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 
 /** Data-fetching hook that gives you all four states for free. */
 export function useApi(fetcher, deps = []) {
@@ -87,27 +87,180 @@ export const Badge = ({ value, tone }) => (
   </span>
 );
 
-/** Simple declarative table. columns: [{key, label, render?, align?}] */
-export function Table({ columns, rows, onRowClick, empty = 'No records' }) {
-  if (!rows?.length) return <div className="state"><h3>{empty}</h3></div>;
+/** Declarative pagination controls with page size selector and page buttons. */
+export function Pagination({
+  currentPage = 1,
+  totalItems = 0,
+  pageSize = 10,
+  onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = [10, 25, 50, 100],
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const start = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const end = Math.min(currentPage * pageSize, totalItems);
+
+  const pages = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const set = new Set([1, totalPages, currentPage, currentPage - 1, currentPage + 1]);
+    const sorted = [...set].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+    const result = [];
+    for (let i = 0; i < sorted.length; i++) {
+      if (i > 0 && sorted[i] - sorted[i - 1] > 1) {
+        result.push('...');
+      }
+      result.push(sorted[i]);
+    }
+    return result;
+  }, [totalPages, currentPage]);
+
+  if (totalItems === 0) return null;
+
   return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>{columns.map((c) => <th key={c.key} className={c.align === 'right' ? 'num' : ''}>{c.label}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={r.id ?? i} className={onRowClick ? 'clickable' : ''} onClick={() => onRowClick?.(r)}>
-              {columns.map((c) => (
-                <td key={c.key} className={c.align === 'right' ? 'num' : ''}>
-                  {c.render ? c.render(r) : (r[c.key] ?? '—')}
-                </td>
+    <div className="pagination-bar">
+      <div className="pagination-info">
+        Showing <strong>{start}–{end}</strong> of <strong>{totalItems}</strong> records
+      </div>
+
+      <div className="pagination-actions">
+        {onPageSizeChange && (
+          <div className="pagination-size">
+            <span className="pagination-size-label">Rows per page:</span>
+            <select
+              className="pagination-select"
+              value={pageSize}
+              onChange={(e) => onPageSizeChange?.(Number(e.target.value))}
+              aria-label="Records per page"
+            >
+              {pageSizeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            </select>
+          </div>
+        )}
+
+        <div className="pagination-controls">
+          <button
+            type="button"
+            className="btn btn-sm pagination-btn"
+            disabled={currentPage <= 1}
+            onClick={() => onPageChange?.(currentPage - 1)}
+            aria-label="Previous page"
+          >
+            ‹ Prev
+          </button>
+
+          {pages.map((p, idx) =>
+            p === '...' ? (
+              <span key={`ellipsis-${idx}`} className="pagination-ellipsis">
+                …
+              </span>
+            ) : (
+              <button
+                key={p}
+                type="button"
+                className={`btn btn-sm pagination-btn ${p === currentPage ? 'pagination-btn-active' : ''}`}
+                onClick={() => onPageChange?.(p)}
+                aria-current={p === currentPage ? 'page' : undefined}
+              >
+                {p}
+              </button>
+            )
+          )}
+
+          <button
+            type="button"
+            className="btn btn-sm pagination-btn"
+            disabled={currentPage >= totalPages}
+            onClick={() => onPageChange?.(currentPage + 1)}
+            aria-label="Next page"
+          >
+            Next ›
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Simple declarative table with built-in pagination. columns: [{key, label, render?, align?}] */
+export function Table({
+  columns,
+  rows = [],
+  onRowClick,
+  empty = 'No records',
+  pageSize: initialPageSize = 10,
+  paginated = true,
+  pageSizeOptions = [10, 25, 50, 100],
+}) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
+
+  const total = rows?.length || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // Reset to page 1 if current page becomes invalid
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [totalPages, currentPage]);
+
+  // Reset to page 1 when data length changes (e.g. search / filter changed)
+  const prevTotalRef = useRef(total);
+  useEffect(() => {
+    if (prevTotalRef.current !== total) {
+      prevTotalRef.current = total;
+      setCurrentPage(1);
+    }
+  }, [total]);
+
+  const pagedRows = useMemo(() => {
+    if (!paginated) return rows || [];
+    const start = (currentPage - 1) * pageSize;
+    return (rows || []).slice(start, start + pageSize);
+  }, [rows, paginated, currentPage, pageSize]);
+
+  if (!rows?.length) return <div className="state"><h3>{empty}</h3></div>;
+
+  return (
+    <div className="table-container">
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>{columns.map((c) => <th key={c.key} className={c.align === 'right' ? 'num' : ''}>{c.label}</th>)}</tr>
+          </thead>
+          <tbody>
+            {pagedRows.map((r, i) => (
+              <tr key={r.id ?? i} className={onRowClick ? 'clickable' : ''} onClick={() => onRowClick?.(r)}>
+                {columns.map((c) => (
+                  <td key={c.key} className={c.align === 'right' ? 'num' : ''}>
+                    {c.render ? c.render(r) : (r[c.key] ?? '—')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {paginated && (
+        <Pagination
+          currentPage={currentPage}
+          totalItems={total}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(newSize) => {
+            setPageSize(newSize);
+            setCurrentPage(1);
+          }}
+          pageSizeOptions={pageSizeOptions}
+        />
+      )}
     </div>
   );
 }
