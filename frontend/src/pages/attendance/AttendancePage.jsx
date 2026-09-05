@@ -404,7 +404,7 @@ export default function AttendancePage() {
             HR Corrected
           </span>
         ) : (
-          <span className="meta">Clock</span>
+          <span className="meta">Manual</span>
         )
       ),
     },
