@@ -7,6 +7,7 @@ import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColum
 import LeaveBalanceWidget from '../../components/LeaveBalanceWidget.jsx';
 
 const TODAY = new Date().toISOString().slice(0, 10);
+const PREVIEW_PATH = '/time-off/requests/preview?';
 
 export default function TimeOffPage() {
   const { user, can } = useAuth();
@@ -87,47 +88,45 @@ export default function TimeOffPage() {
     reason: '',
   });
 
-  // Calculate duration from date_from and date_to
-  const calculateDays = (from, to) => {
-    if (!from || !to || to < from) return 1;
-    const [y1, m1, d1] = from.split('-').map(Number);
-    const [y2, m2, d2] = to.split('-').map(Number);
-    const date1 = Date.UTC(y1, m1 - 1, d1);
-    const date2 = Date.UTC(y2, m2 - 1, d2);
-    const diffDays = Math.round((date2 - date1) / (1000 * 60 * 60 * 24));
-    return Math.max(1, diffDays + 1);
-  };
+  /**
+   * What the chosen range actually costs. Which days are working days depends on
+   * the employee's schedule, which lives on the server, so the form asks instead
+   * of assuming Mon-Fri — and gets the overlap check for free while it is there.
+   */
+  const [reqPreview, setReqPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
-  // Calculate date_to from date_from and duration (e.g. 1 day starting 2026-09-01 ends 2026-09-01)
-  const calculateDateTo = (from, duration) => {
-    if (!from) return TODAY;
-    const dur = parseFloat(duration);
-    if (isNaN(dur) || dur <= 0) return from;
-    const [y, m, d] = from.split('-').map(Number);
-    if (!y || !m || !d) return from;
-    const dt = new Date(Date.UTC(y, m - 1, d));
-    const daysToAdd = Math.max(0, Math.ceil(dur) - 1);
-    dt.setUTCDate(dt.getUTCDate() + daysToAdd);
-    return dt.toISOString().slice(0, 10);
-  };
-
-  const handleReqFieldChange = (field, val) => {
-    const next = { ...reqForm, [field]: val };
-    if (field === 'duration') {
-      if (next.date_from && val && !isNaN(val) && Number(val) > 0) {
-        next.date_to = calculateDateTo(next.date_from, val);
-      }
-    } else if (field === 'date_from') {
-      if (val) {
-        next.date_to = calculateDateTo(val, next.duration);
-      }
-    } else if (field === 'date_to') {
-      if (next.date_from && val) {
-        const dur = calculateDays(next.date_from, val);
-        next.duration = String(dur);
-      }
+  useEffect(() => {
+    if (!newRequestModalOpen) return undefined;
+    const { employee_id, date_from, date_to } = reqForm;
+    if (!employee_id || !date_from || !date_to || date_to < date_from) {
+      setReqPreview(null);
+      return undefined;
     }
-    setReqForm(next);
+
+    let alive = true;
+    setPreviewLoading(true);
+    const q = new URLSearchParams({ employee_id, date_from, date_to });
+    api.get(PREVIEW_PATH + q.toString())
+      .then((p) => {
+        if (!alive) return;
+        setReqPreview(p);
+        setReqForm((f) => ({ ...f, duration: String(p.working_days) }));
+      })
+      .catch(() => alive && setReqPreview(null))
+      .finally(() => alive && setPreviewLoading(false));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newRequestModalOpen, reqForm.employee_id, reqForm.date_from, reqForm.date_to]);
+
+  // Dates decide the length of the request; duration is only trimmed afterwards,
+  // to book a half day out of a full one.
+  const handleReqFieldChange = (field, val) => {
+    setReqForm((f) => {
+      const next = { ...f, [field]: val };
+      if (field === 'date_from' && next.date_to < val) next.date_to = val;
+      return next;
+    });
   };
 
   const openNewRequestModal = () => {
@@ -139,6 +138,7 @@ export default function TimeOffPage() {
       duration: '1',
       reason: '',
     });
+    setReqPreview(null);
     setReqFormError(null);
     setNewRequestModalOpen(true);
   };
@@ -151,6 +151,23 @@ export default function TimeOffPage() {
     if (!reqForm.type_id) return setReqFormError('Leave type is required');
     if (!reqForm.date_from || !reqForm.date_to) return setReqFormError('Dates are required');
     if (reqForm.date_to < reqForm.date_from) return setReqFormError('Date to must be on or after Date from');
+
+    const duration = Number(reqForm.duration);
+    if (!Number.isFinite(duration) || duration <= 0) return setReqFormError('Duration must be greater than 0');
+    if (Math.abs(duration * 2 - Math.round(duration * 2)) > 1e-9) {
+      return setReqFormError('Time off is booked in half-day steps (0.5, 1, 1.5, ...)');
+    }
+    if (reqPreview && reqPreview.working_days === 0) {
+      return setReqFormError('That range has no working days, so there is nothing to take off');
+    }
+    if (reqPreview && duration > reqPreview.working_days) {
+      return setReqFormError('That range has only ' + reqPreview.working_days + ' working day(s)');
+    }
+    if (reqPreview?.conflict) {
+      return setReqFormError(
+        'Overlaps leave already booked for ' + reqPreview.conflict.date_from + ' → ' + reqPreview.conflict.date_to
+      );
+    }
 
     setReqSaving(true);
     try {
@@ -815,6 +832,7 @@ export default function TimeOffPage() {
                 <input
                   className="input"
                   type="date"
+                  min={canApprove ? undefined : TODAY}
                   value={reqForm.date_from}
                   onChange={(e) => handleReqFieldChange('date_from', e.target.value)}
                   required
@@ -832,17 +850,41 @@ export default function TimeOffPage() {
               </Field>
             </div>
 
-            <Field label="Duration (Calculated working days)">
+            <Field label="Duration (working days)">
               <input
                 className="input"
                 type="number"
                 min="0.5"
                 step="0.5"
+                max={reqPreview ? reqPreview.working_days : undefined}
                 value={reqForm.duration}
                 onChange={(e) => handleReqFieldChange('duration', e.target.value)}
                 required
               />
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {previewLoading && 'Checking the calendar...'}
+                {!previewLoading && reqPreview && (
+                  reqPreview.working_days === 0
+                    ? 'No working days in this range — weekends and rest days are not leave.'
+                    : reqPreview.working_days + ' working day(s) out of ' + reqPreview.calendar_days
+                      + ' calendar day(s). Lower it to 0.5 for a half day.'
+                )}
+              </div>
             </Field>
+
+            {reqPreview?.conflict && (
+              <Alert level="error">
+                Overlaps {reqPreview.conflict.type_name} already booked for{' '}
+                {reqPreview.conflict.date_from} → {reqPreview.conflict.date_to}.
+              </Alert>
+            )}
+            {reqPreview?.starts_in_past && !reqPreview.conflict && (
+              <Alert level="warning">
+                {canApprove
+                  ? 'This starts in the past — it will be recorded as leave already taken.'
+                  : 'This starts in the past. Ask HR to record leave you have already taken.'}
+              </Alert>
+            )}
 
             <Field label="Reason / Notes">
               <input

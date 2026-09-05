@@ -29,8 +29,8 @@ export const isAdmin = (req) => req.user?.role === 'admin';
  * "view own employee details ... no HR administration access", so a manager
  * on the employee role still sees only themselves.
  */
-export function visibleEmployees(req, module = 'employees') {
-  const allowed = scope(req, module, 'read');
+export function visibleEmployees(req, module = 'employees', action = 'read') {
+  const allowed = scope(req, module, action);
   if (allowed === 'all') return { scope: 'all', ids: null };
 
   const selfId = req.user?.employee_id ?? null;
@@ -38,9 +38,13 @@ export function visibleEmployees(req, module = 'employees') {
   return { scope: 'self', ids: [selfId] };
 }
 
-/** True when the caller may see this particular employee's records. */
-export function canSeeEmployee(req, employeeId, module = 'employees') {
-  const v = visibleEmployees(req, module);
+/**
+ * True when the caller may touch this particular employee's records.
+ * `action` picks which column of the matrix decides it: reading someone
+ * else's leave and booking it for them are different permissions.
+ */
+export function canSeeEmployee(req, employeeId, module = 'employees', action = 'read') {
+  const v = visibleEmployees(req, module, action);
   if (v.scope === 'all') return true;
   return v.ids.includes(Number(employeeId));
 }
@@ -49,8 +53,8 @@ export function canSeeEmployee(req, employeeId, module = 'employees') {
  * SQL fragment restricting a query to the visible employees.
  * Returns null when no restriction is needed.
  */
-export function employeeScopeFilter(req, column, params, module = 'employees') {
-  const v = visibleEmployees(req, module);
+export function employeeScopeFilter(req, column, params, module = 'employees', action = 'read') {
+  const v = visibleEmployees(req, module, action);
   if (v.scope === 'all') return null;
   if (!v.ids.length) return `${column} IS NULL`; // matches nothing
   params.push(v.ids);

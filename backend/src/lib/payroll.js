@@ -7,7 +7,7 @@
  *     any rule that already ran, by code (RULE.BASIC) or by category total (CAT.ALW).
  */
 import { query, one, tx } from '../db.js';
-import { scheduledDays, overlapDays, hoursBetween, daysBetween, monthBounds } from './dates.js';
+import { scheduledDays, hoursBetween, daysBetween, monthBounds } from './dates.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -71,15 +71,31 @@ export async function periodStats(employee, contract, periodStart, periodEnd) {
     [employee.id, periodEnd, periodStart]
   );
 
+  // A request already records what it costs — half days included — so the
+  // period must charge that declared duration, not a fresh count of calendar
+  // days. Leave straddling the period boundary is split by working days.
+  const hasSchedule = lines.length > 0;
+  const countDays = (a, b) => (hasSchedule ? scheduledDays(lines, a, b) : daysBetween(a, b));
+
   let paidLeaveDays = 0;
   let unpaidLeaveDays = 0;
   for (const l of leaves) {
-    const d = overlapDays(periodStart, periodEnd, l.date_from, l.date_to);
+    const from = l.date_from > periodStart ? l.date_from : periodStart;
+    const to = l.date_to < periodEnd ? l.date_to : periodEnd;
+    if (from > to) continue;
+
+    const wholeDays = countDays(l.date_from, l.date_to);
+    const inPeriod = countDays(from, to);
+    const declared = Number(l.duration) || wholeDays;
+    const d = wholeDays > 0 ? round2(declared * (inPeriod / wholeDays)) : declared;
+
     if (l.is_paid) paidLeaveDays += d;
     else unpaidLeaveDays += d;
   }
+  paidLeaveDays = round2(paidLeaveDays);
+  unpaidLeaveDays = round2(unpaidLeaveDays);
 
-  const workedDays = Math.max(0, workingDays - unpaidLeaveDays);
+  const workedDays = round2(Math.max(0, workingDays - unpaidLeaveDays));
 
   return {
     workingDays,
@@ -92,7 +108,7 @@ export async function periodStats(employee, contract, periodStart, periodEnd) {
     manualEdits,
     paidLeaveDays,
     unpaidLeaveDays,
-    leaveDays: paidLeaveDays + unpaidLeaveDays,
+    leaveDays: round2(paidLeaveDays + unpaidLeaveDays),
   };
 }
 

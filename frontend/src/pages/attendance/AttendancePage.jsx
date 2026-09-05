@@ -60,32 +60,18 @@ export default function AttendancePage() {
   // Reference data
   const employees = useApi(() => api.get('/employees'), []);
 
-  // Filter available employees by role:
-  // - Admin: all employees
-  // - HR Manager: subordinates (where manager_id == user.employee_id) plus self (id == user.employee_id)
-  // - Self-only (employee, payroll): only self
+  // /employees is already scoped by the server to what this role may see, so the
+  // page must not re-derive visibility from the org chart — that walk disagreed
+  // with the permission matrix, which is the single source of truth. The only
+  // narrowing left to the UI is for roles that may record attendance for
+  // themselves alone.
   const availableEmployees = useMemo(() => {
     const list = employees.data || [];
-    if (isAdmin) return list;
-    if (isHRManager) {
-      const subordinateIds = new Set([user?.employee_id]);
-      let added = true;
-      while (added) {
-        added = false;
-        for (const emp of list) {
-          if (emp.manager_id && subordinateIds.has(emp.manager_id) && !subordinateIds.has(emp.id)) {
-            subordinateIds.add(emp.id);
-            added = true;
-          }
-        }
-      }
-      return list.filter((emp) => subordinateIds.has(emp.id));
-    }
-    if (isSelfOnly) {
-      return list.filter((emp) => emp.id === user?.employee_id);
+    if (can('attendance', 'write') === 'own' && user?.employee_id) {
+      return list.filter((emp) => emp.id === user.employee_id);
     }
     return list;
-  }, [employees.data, isAdmin, isHRManager, isSelfOnly, user?.employee_id]);
+  }, [employees.data, can, user?.employee_id]);
 
   // Today status of active employee
   const { data: todayStatus, reload: reloadStatus } = useApi(
