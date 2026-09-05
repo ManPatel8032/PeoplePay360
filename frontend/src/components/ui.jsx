@@ -165,7 +165,7 @@ export const empNumberColumn = {
 /**
  * Debounce a rapidly changing value by `delay` ms.
  */
-export function useDebounce(value, delay = 300) {
+export function useDebounce(value, delay = 2000) {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
   useEffect(() => {
@@ -189,7 +189,7 @@ export function SearchInput({
   onChange,
   onImmediateChange,
   placeholder = 'Search...',
-  delay = 300,
+  delay = 2000,
   className = '',
   style = {},
   id,
