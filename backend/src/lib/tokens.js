@@ -1,7 +1,11 @@
 import crypto from 'node:crypto';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'pp360-dev-jwt-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (process.env.NODE_ENV === 'production' && !JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in production');
+}
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'pp360-dev-jwt-secret-key-change-in-production';
 const ACCESS_TOKEN_EXPIRY = '15m';
 
 export const REFRESH_COOKIE_NAME = 'refreshToken';
@@ -17,7 +21,7 @@ export function signAccessToken(user) {
       role: user.role,
       employee_id: user.employee_id,
     },
-    JWT_SECRET,
+    EFFECTIVE_JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRY }
   );
 }
@@ -27,7 +31,7 @@ export function signAccessToken(user) {
  */
 export function verifyAccessToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, EFFECTIVE_JWT_SECRET);
   } catch (_err) {
     return null;
   }

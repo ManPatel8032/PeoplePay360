@@ -135,8 +135,18 @@ app.post('/api/auth/login', async (req, res) => {
     path: '/',
   });
 
-  const { password_hash, ...safeUser } = user;
-  res.json({ user: safeUser, accessToken });
+  res.json({
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      employee_id: user.employee_id,
+      is_active: user.is_active,
+      must_change_password: user.must_change_password,
+    },
+    accessToken,
+  });
 });
 
 // Refresh endpoint
@@ -183,7 +193,20 @@ app.post('/api/auth/refresh', async (req, res) => {
 // Me endpoint
 app.get('/api/auth/me', (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-  res.json({ data: { user: req.user, permissions: MATRIX } });
+  res.json({
+    data: {
+      user: {
+        id: req.user.id,
+        name: req.user.name,
+        email: req.user.email,
+        role: req.user.role,
+        employee_id: req.user.employee_id,
+        is_active: req.user.is_active,
+        must_change_password: req.user.must_change_password,
+      },
+      permissions: MATRIX,
+    },
+  });
 });
 
 // Change password endpoint

@@ -59,7 +59,9 @@ authRouter.post('/login', loginLimiter, ah(async (req, res) => {
 
   const { email, password } = parseResult.data;
   const user = await one(
-    `SELECT * FROM users WHERE LOWER(email) = LOWER($1)`,
+    `SELECT id, name, email, role, employee_id, is_active, must_change_password, password_hash, failed_attempts, locked_until
+       FROM users
+      WHERE LOWER(email) = LOWER($1)`,
     [email.trim()]
   );
 
@@ -125,9 +127,16 @@ authRouter.post('/login', loginLimiter, ah(async (req, res) => {
 
   setRefreshTokenCookie(res, rawRefreshToken);
 
-  const { password_hash, ...safeUser } = user;
   res.json({
-    user: safeUser,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      employee_id: user.employee_id,
+      is_active: user.is_active,
+      must_change_password: user.must_change_password,
+    },
     accessToken,
   });
 }));

@@ -47,18 +47,20 @@ export async function attachUser(req, _res, next) {
       }
     }
 
-    // Dev/transitional fallback: support x-user-id header if present
-    const id = Number(req.header('x-user-id')) || 0;
-    if (id) {
-      const user = await one(
-        `SELECT id, name, email, role, employee_id, is_active, must_change_password
-           FROM users
-          WHERE id = $1 AND is_active = TRUE`,
-        [id]
-      );
-      if (user) {
-        req.user = user;
-        return next();
+    if (process.env.NODE_ENV !== 'production') {
+      // Dev/transitional fallback: support x-user-id header if present
+      const id = Number(req.header('x-user-id')) || 0;
+      if (id) {
+        const user = await one(
+          `SELECT id, name, email, role, employee_id, is_active, must_change_password
+             FROM users
+            WHERE id = $1 AND is_active = TRUE`,
+          [id]
+        );
+        if (user) {
+          req.user = user;
+          return next();
+        }
       }
     }
 
