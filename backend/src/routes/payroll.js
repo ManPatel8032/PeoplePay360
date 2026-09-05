@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
+import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { computePayslip, getPayslip, contractForPeriod, periodStats, collectWarnings } from '../lib/payroll.js';
 import { renderPayslipPdf } from '../lib/pdf.js';
@@ -191,7 +192,7 @@ async function payrunDetail(id) {
   const run = await one(PAYRUN_SQL + ' WHERE p.id = $1', [id]);
   if (!run) return null;
   run.payslips = await query(
-    `SELECT ps.*, e.name AS employee_name, e.bank_account, d.name AS department_name
+    `SELECT ps.*, e.name AS employee_name, e.employee_number, e.bank_account, d.name AS department_name
        FROM payslips ps
        JOIN employees e ON e.id = ps.employee_id
        LEFT JOIN departments d ON d.id = e.department_id
@@ -281,29 +282,22 @@ payruns.post('/:id/send-payslips', can('payruns', 'write'), ah(async (req, res) 
 // ---------- Payslips (B7, B8) ----------
 export const payslips = Router();
 
-/** Helper: enforce employee-only access to own payslips. */
-function enforceSelfScope(req, slip) {
-  const selfId = scopeToSelf(req);
-  if (selfId && slip.employee_id !== selfId) return false;
-  return true;
-}
+/** A payslip is visible if its employee is inside the caller's scope. */
+const enforceSelfScope = (req, slip) => canSeeEmployee(req, slip.employee_id);
 
 payslips.get('/', can('payslips', 'read'), ah(async (req, res) => {
   const params = [];
   const where = [];
 
-  // Employee security: employees can ONLY see their own payslips
-  const selfId = scopeToSelf(req);
-  if (selfId) {
-    params.push(selfId);
-    where.push(`ps.employee_id = $${params.length}`);
-  }
+  // Managers see their subtree's payslips; ICs see only their own.
+  const scopeSql = await employeeScopeFilter(req, 'ps.employee_id', params);
+  if (scopeSql) where.push(scopeSql);
 
   for (const [q, col] of Object.entries({ payrun_id: 'ps.payrun_id', employee_id: 'ps.employee_id', state: 'ps.state' })) {
     if (req.query[q]) { params.push(req.query[q]); where.push(`${col} = $${params.length}`); }
   }
   const data = await query(
-    `SELECT ps.*, e.name AS employee_name, d.name AS department_name,
+    `SELECT ps.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
             r.name AS payrun_name, s.name AS structure_name
        FROM payslips ps
        JOIN employees e ON e.id = ps.employee_id
@@ -320,7 +314,7 @@ payslips.get('/', can('payslips', 'read'), ah(async (req, res) => {
 payslips.get('/:id', can('payslips', 'read'), ah(async (req, res) => {
   const data = await getPayslip(req.params.id);
   if (!data) return res.status(404).json({ error: 'Not found' });
-  if (!enforceSelfScope(req, data))
+  if (!(await enforceSelfScope(req, data)))
     return res.status(403).json({ error: 'You can only view your own payslips' });
   res.json({ data });
 }));
@@ -332,7 +326,7 @@ payslips.post('/:id/compute', can('payslips', 'write'), ah(async (req, res) => {
 payslips.get('/:id/pdf', can('payslips', 'read'), ah(async (req, res) => {
   const slip = await getPayslip(req.params.id);
   if (!slip) return res.status(404).json({ error: 'Not found' });
-  if (!enforceSelfScope(req, slip))
+  if (!(await enforceSelfScope(req, slip)))
     return res.status(403).json({ error: 'You can only download your own payslip' });
   const pdf = await renderPayslipPdf(slip);
   res.setHeader('Content-Type', 'application/pdf');

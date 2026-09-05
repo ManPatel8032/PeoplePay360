@@ -148,3 +148,16 @@ export function Modal({ title, onClose, children, width = 560 }) {
     </div>
   );
 }
+
+/**
+ * Staff code column, shared by every table that lists employees so the format
+ * and placement stay identical across the app.
+ */
+export const empNumberColumn = {
+  key: 'employee_number',
+  label: 'Emp. No.',
+  render: (r) =>
+    r.employee_number
+      ? <span className="mono">{r.employee_number}</span>
+      : <span className="muted">—</span>,
+};

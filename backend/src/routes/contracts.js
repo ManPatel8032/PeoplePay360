@@ -3,12 +3,12 @@ import { Router } from 'express';
 import { query, one } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
 import { ah } from '../lib/crud.js';
-import { blockPayrollStaffPay, rejected } from '../lib/guards.js';
+import { blockPayrollStaffPay, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
 export const contracts = Router();
 
 const CONTRACT_SQL = `
-  SELECT c.*, e.name AS employee_name, d.name AS department_name,
+  SELECT c.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
          j.name AS job_position_name, s.name AS structure_name, w.name AS schedule_name
     FROM contracts c
     JOIN employees e ON e.id = c.employee_id
@@ -34,8 +34,6 @@ async function findOverlappingContracts(employeeId, startDate, endDate, excludeI
 
 // List contracts
 contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
-  const employeeId = selfId || req.query.employee_id;
   const state = req.query.state;
   const structureId = req.query.structure_id;
   const search = req.query.search;
@@ -43,6 +41,11 @@ contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
   const where = [];
   const params = [];
 
+  // Managers see their own record plus their whole subtree; ICs see only their own.
+  const scopeSql = await employeeScopeFilter(req, 'c.employee_id', params);
+  if (scopeSql) where.push(scopeSql);
+
+  const employeeId = req.query.employee_id;
   if (employeeId) {
     params.push(employeeId);
     where.push(`c.employee_id = $${params.length}`);
@@ -85,9 +88,8 @@ contracts.post('/check-overlap', can('contracts', 'read'), ah(async (req, res) =
 contracts.get('/:id', can('contracts', 'read'), ah(async (req, res) => {
   const row = await one(`${CONTRACT_SQL} WHERE c.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const selfId = scopeToSelf(req);
-  if (selfId && row.employee_id !== selfId) {
-    return res.status(403).json({ error: 'Cannot view contract for another employee' });
+  if (!(await canSeeEmployee(req, row.employee_id))) {
+    return res.status(403).json({ error: 'This contract is outside your team' });
   }
   res.json({ data: row });
 }));

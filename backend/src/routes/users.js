@@ -60,9 +60,43 @@ async function wouldOrphanAdmins(userId, { role, is_active }) {
   return others.n === 0;
 }
 
-// ---------- list ----------
+/**
+ * ---------- list ----------
+ * Employee-centric: every employee appears, whether or not they have a login,
+ * so an admin can see who still needs an account. Logins with no employee
+ * record (the IT admin) are appended at the end.
+ */
 usersRouter.get('/', can('users', 'read'), ah(async (_req, res) => {
-  res.json({ data: await query(`${USER_SQL} ORDER BY u.id`) });
+  const data = await query(
+    `SELECT e.id            AS employee_id,
+            e.employee_number,
+            e.name          AS employee_name,
+            e.work_email,
+            e.status        AS employee_status,
+            d.name          AS department_name,
+            j.name          AS job_position_name,
+            m.name          AS manager_name,
+            u.id            AS user_id,
+            u.name, u.email, u.role, u.is_active,
+            u.must_change_password, u.locked_until, u.last_login_at,
+            (SELECT COUNT(*) FROM employees r WHERE r.manager_id = e.id)::int AS direct_reports
+       FROM employees e
+       LEFT JOIN departments d ON d.id = e.department_id
+       LEFT JOIN job_positions j ON j.id = e.job_position_id
+       LEFT JOIN employees m ON m.id = e.manager_id
+       LEFT JOIN users u ON u.employee_id = e.id
+
+      UNION ALL
+
+     SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+            u.id, u.name, u.email, u.role, u.is_active,
+            u.must_change_password, u.locked_until, u.last_login_at, 0
+       FROM users u
+      WHERE u.employee_id IS NULL
+
+      ORDER BY employee_number NULLS LAST`
+  );
+  res.json({ data });
 }));
 
 usersRouter.get('/:id', can('users', 'read'), ah(async (req, res) => {

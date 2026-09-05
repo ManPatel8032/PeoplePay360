@@ -42,6 +42,10 @@ async function main() {
 
   const posDefs = [
     ['Managing Director', 'Executive'],
+    ['Engineering Head', 'Engineering'], ['Team Lead', 'Engineering'],
+    ['Sales Head', 'Sales'], ['Regional Lead', 'Sales'],
+    ['Operations Head', 'Operations'],
+    ['HR Executive', 'Human Resources'], ['Accounts Executive', 'Finance'],
     ['Senior Engineer', 'Engineering'], ['Engineer', 'Engineering'], ['QA Engineer', 'Engineering'],
     ['Account Executive', 'Sales'], ['Sales Manager', 'Sales'],
     ['HR Business Partner', 'Human Resources'], ['Recruiter', 'Human Resources'],
@@ -112,25 +116,51 @@ async function main() {
     )).id;
 
   // ---------- employees ----------
-  // Index 0 is the Managing Director: the single root of the org chart and the
-  // only employee without a manager. Everybody else — department heads
-  // included — reports to somebody.
+  /*
+   * Four levels: MD -> department head -> team lead -> team member.
+   * `manager` names the person each employee reports to; only the MD has none,
+   * so every other employee — team leads and department heads included — has a
+   * manager. Objects rather than tuples because several later steps read these
+   * fields by name.
+   */
   const people = [
-    ['Rohini Deshpande','Executive',        'Managing Director',   'full_time', 260000, std,  'HDFC0001-1000001'],
-    ['Aarav Sharma',    'Engineering',      'Senior Engineer',     'full_time', 145000, std,  'HDFC0001-8827341'],
-    ['Priya Nair',      'Engineering',      'Engineer',            'full_time', 95000,  std,  'ICIC0002-3391822'],
-    ['Rohan Mehta',     'Engineering',      'Engineer',            'full_time', 88000,  std,  'SBIN0003-7712094'],
-    ['Sneha Kulkarni',  'Engineering',      'QA Engineer',         'full_time', 72000,  std,  null],
-    ['Vikram Rao',      'Sales',            'Sales Manager',       'full_time', 120000, std,  'AXIS0004-2214877'],
-    ['Ananya Iyer',     'Sales',            'Account Executive',   'full_time', 78000,  std,  'HDFC0001-5566120'],
-    ['Kabir Singh',     'Sales',            'Account Executive',   'contract',  60000,  flex, 'KOTK0005-9911233'],
-    ['Meera Joshi',     'Human Resources',  'HR Business Partner', 'full_time', 98000,  std,  'ICIC0002-4478210'],
-    ['Devansh Gupta',   'Human Resources',  'Recruiter',           'part_time', 45000,  part, 'SBIN0003-1188447'],
-    ['Ishita Banerjee', 'Finance',          'Financial Analyst',   'full_time', 105000, std,  'AXIS0004-6633901'],
-    ['Arjun Patel',     'Finance',          'Payroll Officer',     'full_time', 92000,  std,  'HDFC0001-7799002'],
-    ['Nisha Verma',     'Operations',       'Operations Associate','full_time', 65000,  std,  'KOTK0005-3322118'],
-    ['Farhan Qureshi',  'Operations',       'Operations Associate','intern',    25000,  part, null],
-    ['Tara Menon',      'Engineering',      'Engineer',            'full_time', 91000,  std,  'ICIC0002-8845112'],
+    // Executive — the single root
+    { name: 'Rohini Deshpande', dept: 'Executive', position: 'Managing Director', type: 'full_time', wage: 260000, sched: std, bank: 'HDFC0001-1000001', manager: null },
+
+    // Engineering: head -> 2 team leads -> 5 members
+    { name: 'Aarav Sharma',   dept: 'Engineering', position: 'Engineering Head', type: 'full_time', wage: 185000, sched: std,  bank: 'HDFC0001-8827341', manager: 'Rohini Deshpande' },
+    { name: 'Priya Nair',     dept: 'Engineering', position: 'Team Lead',        type: 'full_time', wage: 128000, sched: std,  bank: 'ICIC0002-3391822', manager: 'Aarav Sharma' },
+    { name: 'Sneha Kulkarni', dept: 'Engineering', position: 'Team Lead',        type: 'full_time', wage: 118000, sched: std,  bank: null,               manager: 'Aarav Sharma' },
+    { name: 'Rohan Mehta',    dept: 'Engineering', position: 'Engineer',         type: 'full_time', wage: 88000,  sched: std,  bank: 'SBIN0003-7712094', manager: 'Priya Nair' },
+    { name: 'Tara Menon',     dept: 'Engineering', position: 'Engineer',         type: 'full_time', wage: 91000,  sched: std,  bank: 'ICIC0002-8845112', manager: 'Priya Nair' },
+    { name: 'Ishaan Kapoor',  dept: 'Engineering', position: 'Engineer',         type: 'full_time', wage: 84000,  sched: std,  bank: 'HDFC0001-4412093', manager: 'Priya Nair' },
+    { name: 'Neha Pillai',    dept: 'Engineering', position: 'QA Engineer',      type: 'full_time', wage: 76000,  sched: std,  bank: 'AXIS0004-7781234', manager: 'Sneha Kulkarni' },
+    { name: 'Aditya Rane',    dept: 'Engineering', position: 'QA Engineer',      type: 'intern',    wage: 28000,  sched: part, bank: null,               manager: 'Sneha Kulkarni' },
+
+    // Sales: head -> 2 regional leads -> 4 members
+    { name: 'Vikram Rao',      dept: 'Sales', position: 'Sales Head',        type: 'full_time', wage: 155000, sched: std,  bank: 'AXIS0004-2214877', manager: 'Rohini Deshpande' },
+    { name: 'Ananya Iyer',     dept: 'Sales', position: 'Regional Lead',     type: 'full_time', wage: 112000, sched: std,  bank: 'HDFC0001-5566120', manager: 'Vikram Rao' },
+    { name: 'Karan Bhatia',    dept: 'Sales', position: 'Regional Lead',     type: 'full_time', wage: 108000, sched: std,  bank: 'ICIC0002-9922114', manager: 'Vikram Rao' },
+    { name: 'Kabir Singh',     dept: 'Sales', position: 'Account Executive', type: 'contract',  wage: 60000,  sched: flex, bank: 'KOTK0005-9911233', manager: 'Ananya Iyer' },
+    { name: 'Riya Malhotra',   dept: 'Sales', position: 'Account Executive', type: 'full_time', wage: 74000,  sched: std,  bank: 'SBIN0003-6650091', manager: 'Ananya Iyer' },
+    { name: 'Zoya Khan',       dept: 'Sales', position: 'Account Executive', type: 'full_time', wage: 71000,  sched: std,  bank: 'AXIS0004-3390127', manager: 'Karan Bhatia' },
+    { name: 'Manav Desai',     dept: 'Sales', position: 'Account Executive', type: 'contract',  wage: 58000,  sched: flex, bank: null,               manager: 'Karan Bhatia' },
+
+    // Human Resources
+    { name: 'Meera Joshi',   dept: 'Human Resources', position: 'HR Business Partner', type: 'full_time', wage: 118000, sched: std,  bank: 'ICIC0002-4478210', manager: 'Rohini Deshpande' },
+    { name: 'Devansh Gupta', dept: 'Human Resources', position: 'Recruiter',           type: 'part_time', wage: 45000,  sched: part, bank: 'SBIN0003-1188447', manager: 'Meera Joshi' },
+    { name: 'Sana Sheikh',   dept: 'Human Resources', position: 'HR Executive',        type: 'full_time', wage: 62000,  sched: std,  bank: 'HDFC0001-2233445', manager: 'Meera Joshi' },
+
+    // Finance — Arjun (payroll_manager) heads it, so the reporting line runs the
+    // same way as the permission hierarchy
+    { name: 'Arjun Patel',     dept: 'Finance', position: 'Payroll Officer',     type: 'full_time', wage: 125000, sched: std, bank: 'HDFC0001-7799002', manager: 'Rohini Deshpande' },
+    { name: 'Ishita Banerjee', dept: 'Finance', position: 'Financial Analyst',   type: 'full_time', wage: 105000, sched: std, bank: 'AXIS0004-6633901', manager: 'Arjun Patel' },
+    { name: 'Kunal Shah',      dept: 'Finance', position: 'Accounts Executive',  type: 'full_time', wage: 68000,  sched: std, bank: 'KOTK0005-8801556', manager: 'Arjun Patel' },
+
+    // Operations
+    { name: 'Nisha Verma',    dept: 'Operations', position: 'Operations Head',      type: 'full_time', wage: 110000, sched: std,  bank: 'KOTK0005-3322118', manager: 'Rohini Deshpande' },
+    { name: 'Farhan Qureshi', dept: 'Operations', position: 'Operations Associate', type: 'intern',    wage: 25000,  sched: part, bank: null,               manager: 'Nisha Verma' },
+    { name: 'Pooja Naik',     dept: 'Operations', position: 'Operations Associate', type: 'full_time', wage: 64000,  sched: std,  bank: 'ICIC0002-5567788', manager: 'Nisha Verma' },
   ];
 
   const today = new Date();
@@ -138,48 +168,32 @@ async function main() {
   const empIds = [];
 
   for (let i = 0; i < people.length; i++) {
-    const [name, dept, position, etype, , sched, bank] = people[i];
-    const email = name.toLowerCase().replace(/[^a-z]+/g, '.') + '@peoplepay360.com';
-    const join = new Date(joinBase.getTime() + i * 37 * 86400000).toISOString().slice(0, 10);
+    const p = people[i];
+    const email = p.name.toLowerCase().replace(/[^a-z]+/g, '.') + '@peoplepay360.com';
+    const join = new Date(joinBase.getTime() + i * 26 * 86400000).toISOString().slice(0, 10);
     const row = await one(
       `INSERT INTO employees (name, work_email, phone, department_id, job_position_id, schedule_id,
                               employee_type, status, bank_account, join_date)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-      [name, email, `+91 9${rndInt(100000000, 999999999)}`, depts[dept], pos[position], sched,
-       etype, name === 'Devansh Gupta' ? 'on_leave' : 'active', bank, join]
+      [p.name, email, `+91 9${rndInt(100000000, 999999999)}`, depts[p.dept], pos[p.position], p.sched,
+       p.type, p.name === 'Devansh Gupta' ? 'on_leave' : 'active', p.bank, join]
     );
     empIds.push(row.id);
   }
 
   /* Name -> id, so the reporting lines below don't silently break the next time
      somebody inserts a row into `people`. */
-  const byName = Object.fromEntries(people.map((p, i) => [p[0], empIds[i]]));
+  const byName = Object.fromEntries(people.map((p, i) => [p.name, empIds[i]]));
 
-  /*
-   * Reporting lines. Every employee gets a manager; the Managing Director is
-   * the single root (manager_id stays NULL). Department heads report to the MD,
-   * so managers have managers too.
-   */
-  const MD = byName['Rohini Deshpande'];
-  const DEPARTMENT_HEADS = {
-    Engineering:       byName['Aarav Sharma'],
-    Sales:             byName['Vikram Rao'],
-    'Human Resources': byName['Meera Joshi'],
-    // Arjun (payroll_manager) heads Finance so the reporting line runs the same
-    // way as the permission hierarchy — Ishita is payroll_user and reports up.
-    Finance:           byName['Arjun Patel'],
-    Operations:        byName['Nisha Verma'],
-  };
-
-  for (const [deptName, headId] of Object.entries(DEPARTMENT_HEADS)) {
-    // the head reports to the MD ...
-    await query('UPDATE employees SET manager_id = $1 WHERE id = $2', [MD, headId]);
-    // ... and everyone else in that department reports to the head
-    await query(
-      'UPDATE employees SET manager_id = $1 WHERE department_id = $2 AND id <> $1',
-      [headId, depts[deptName]]
-    );
+  // Reporting lines come straight from the `manager` field above.
+  for (const p of people) {
+    if (!p.manager) continue;
+    const managerId = byName[p.manager];
+    if (!managerId) throw new Error(`${p.name} lists an unknown manager: ${p.manager}`);
+    await query('UPDATE employees SET manager_id = $1 WHERE id = $2', [managerId, byName[p.name]]);
   }
+
+  const MD = byName['Rohini Deshpande'];
 
   const orphans = await query(
     'SELECT name FROM employees WHERE manager_id IS NULL AND id <> $1', [MD]
@@ -212,10 +226,16 @@ async function main() {
     ['Meera Joshi',      'meera.hr@peoplepay360.com',  'hr_manager',      byName['Meera Joshi']],
     ['Arjun Patel',      'arjun.pay@peoplepay360.com', 'payroll_manager', byName['Arjun Patel']],
     ['Ishita Banerjee',  'ishita.pay@peoplepay360.com','payroll_user',    byName['Ishita Banerjee']],
+    // Every manager gets a login so subtree visibility can be demonstrated at
+    // each level: department head, team lead, then an individual contributor.
     ['Aarav Sharma',     'aarav.emp@peoplepay360.com', 'employee',        byName['Aarav Sharma']],
-    ['Vikram Rao',       'vikram.emp@peoplepay360.com','employee',        byName['Vikram Rao']],
-    ['Nisha Verma',      'nisha.emp@peoplepay360.com', 'employee',        byName['Nisha Verma']],
     ['Priya Nair',       'priya.emp@peoplepay360.com', 'employee',        byName['Priya Nair']],
+    ['Sneha Kulkarni',   'sneha.emp@peoplepay360.com', 'employee',        byName['Sneha Kulkarni']],
+    ['Vikram Rao',       'vikram.emp@peoplepay360.com','employee',        byName['Vikram Rao']],
+    ['Ananya Iyer',      'ananya.emp@peoplepay360.com','employee',        byName['Ananya Iyer']],
+    ['Karan Bhatia',     'karan.emp@peoplepay360.com', 'employee',        byName['Karan Bhatia']],
+    ['Nisha Verma',      'nisha.emp@peoplepay360.com', 'employee',        byName['Nisha Verma']],
+    ['Rohan Mehta',      'rohan.emp@peoplepay360.com', 'employee',        byName['Rohan Mehta']],
   ];
   for (const [name, email, role, empId] of userDefs) {
     await query(
@@ -231,7 +251,7 @@ async function main() {
   const dayBefore = new Date(new Date(renewalDate + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
 
   for (let i = 0; i < empIds.length; i++) {
-    const [name, dept, position, etype, wage, sched] = people[i];
+    const { name, dept, position, type: etype, wage, sched } = people[i];
     const structure = etype === 'contract' ? contractStruct : regular;
 
     if (i % 3 === 0) {
@@ -352,7 +372,7 @@ async function main() {
     );
     for (const id of empIds) {
       // contractors are paid on their own structure, so keep them out of the regular run
-      const isContractor = people[empIds.indexOf(id)][3] === 'contract';
+      const isContractor = people[empIds.indexOf(id)].type === 'contract';
       if (isContractor) continue;
       await query(
         `INSERT INTO payslips (payrun_id,employee_id,period_start,period_end,structure_id)
