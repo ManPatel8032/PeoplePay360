@@ -175,6 +175,13 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
                       <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
                         <div style={{ fontWeight: 500 }}>{emp.name}</div>
                         {emp.contract_name && <div className="meta">{emp.contract_name}</div>}
+                        {/* The contract decides which rules apply, so say so when it
+                            differs from the structure chosen for the batch. */}
+                        {emp.structure_id && String(emp.structure_id) !== String(form.structure_id) && (
+                          <div className="meta" style={{ color: 'var(--warning, #b45309)' }}>
+                            Paid on {emp.structure_name}
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>{emp.department_name || '—'}</td>
                       <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>

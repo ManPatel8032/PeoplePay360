@@ -5,6 +5,7 @@ import { can } from '../auth.js';
 import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { computePayslip, getPayslip, contractForPeriod, periodStats } from '../lib/payroll.js';
+import { validateFormula } from '../lib/formula.js';
 import { renderPayslipPdf } from '../lib/pdf.js';
 import { sendPayslipMail } from '../lib/mail.js';
 
@@ -52,6 +53,8 @@ export const rules = crudRouter({
     // Readable duplicate-code message instead of a raw unique-violation.
     beforeCreate: async (req) => {
       if (!req.body.code || !req.body.structure_id) return null;
+      const bad = validateFormula(req.body.formula);
+      if (bad) return { status: 400, error: `Formula is not valid: ${bad}` };
       const dup = await one(
         'SELECT id FROM salary_rules WHERE structure_id = $1 AND code = $2',
         [req.body.structure_id, req.body.code]
@@ -59,6 +62,11 @@ export const rules = crudRouter({
       return dup
         ? { status: 400, error: `Rule code '${req.body.code}' already exists in this structure` }
         : null;
+    },
+    // Catch a broken formula when it is saved, not when payroll runs on it.
+    beforeUpdate: (req) => {
+      const bad = validateFormula(req.body.formula);
+      return bad ? { status: 400, error: `Formula is not valid: ${bad}` } : null;
     },
   },
 });
@@ -130,9 +138,15 @@ payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
   const rows = await query(
     `SELECT e.id, e.name, e.employee_type, e.bank_account, d.name AS department_name,
             c.id AS contract_id, c.name AS contract_name, c.wage, c.end_date AS contract_end,
+            c.structure_id, st.name AS structure_name,
+            -- Overlap, not an exact period match: paid for 1-31 Aug rules out 15-31 Aug.
             (SELECT COUNT(*)::int FROM payslips ps
-              WHERE ps.employee_id = e.id AND ps.period_start = $2 AND ps.period_end = $1
-                AND ps.state <> 'cancelled') AS existing_payslips
+              WHERE ps.employee_id = e.id AND ps.state <> 'cancelled'
+                AND ps.period_start <= $1 AND ps.period_end >= $2) AS existing_payslips,
+            (SELECT string_agg(ps.period_start || ' → ' || ps.period_end, ', ' ORDER BY ps.period_start)
+               FROM payslips ps
+              WHERE ps.employee_id = e.id AND ps.state <> 'cancelled'
+                AND ps.period_start <= $1 AND ps.period_end >= $2) AS overlapping_periods
        FROM employees e
        LEFT JOIN departments d ON d.id = e.department_id
        LEFT JOIN LATERAL (
@@ -141,6 +155,7 @@ payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
                AND c2.start_date <= $1 AND (c2.end_date IS NULL OR c2.end_date >= $2)
              ORDER BY c2.start_date DESC LIMIT 1
        ) c ON TRUE
+       LEFT JOIN salary_structures st ON st.id = c.structure_id
       WHERE e.status <> 'inactive' ${filter}
       ORDER BY e.name`,
     params
@@ -149,11 +164,11 @@ payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
   res.json({
     data: rows.map((r) => ({
       ...r,
-      eligible: !!r.contract_id,
+      eligible: !!r.contract_id && r.existing_payslips === 0,
       blockers: [
         !r.contract_id && 'No contract for this period',
         !r.bank_account && 'Missing bank details',
-        r.existing_payslips > 0 && 'Payslip already exists for this period',
+        r.existing_payslips > 0 && `Already payrolled for ${r.overlapping_periods}`,
       ].filter(Boolean),
     })),
   });
@@ -164,8 +179,31 @@ payruns.post('/wizard', can('payruns', 'write'), ah(async (req, res) => {
   const { name, structure_id, period_start, period_end, department_id, employee_ids = [] } = req.body;
   if (!structure_id || !period_start || !period_end)
     return res.status(400).json({ error: 'Structure and period are required' });
+  if (period_end < period_start)
+    return res.status(400).json({ error: 'Period end must be on or after period start' });
   if (!employee_ids.length)
     return res.status(400).json({ error: 'Select at least one employee' });
+
+  // Nobody may be paid twice for the same day. Refused here rather than left to
+  // a warning at validation time, because by then the payslips already exist.
+  const clashes = await query(
+    `SELECT e.name, ps.period_start, ps.period_end, ps.state, r.name AS payrun_name
+       FROM payslips ps
+       JOIN employees e ON e.id = ps.employee_id
+       JOIN payruns r ON r.id = ps.payrun_id
+      WHERE ps.employee_id = ANY($1::int[]) AND ps.state <> 'cancelled'
+        AND ps.period_start <= $3::date AND ps.period_end >= $2::date
+      ORDER BY e.name, ps.period_start`,
+    [employee_ids, period_start, period_end]
+  );
+  if (clashes.length) {
+    return res.status(409).json({
+      error: 'Some of the selected employees are already payrolled for an overlapping period',
+      blockers: clashes.map(
+        (c) => `${c.name}: ${c.period_start} → ${c.period_end} (${c.payrun_name}, ${c.state})`
+      ),
+    });
+  }
 
   const payrunId = await tx(async (c) => {
     const { rows } = await c.query(
