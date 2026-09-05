@@ -1,6 +1,12 @@
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { api, getUserId, setUserId } from './api.js';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { AuthProvider, useAuth } from './auth/AuthContext.jsx';
+import { RequireAuth, RequireRole, RedirectIfAuthed } from './auth/guards.jsx';
+
+import LoginPage from './pages/auth/LoginPage.jsx';
+import SignupPage from './pages/auth/SignupPage.jsx';
+import ChangePasswordPage from './pages/auth/ChangePasswordPage.jsx';
+
 import Dashboard from './pages/Dashboard.jsx';
 import Placeholder from './pages/Placeholder.jsx';
 import ContractsPage from './pages/contracts/ContractsPage.jsx';
@@ -8,80 +14,158 @@ import AttendancePage from './pages/attendance/AttendancePage.jsx';
 import SchedulesPage from './pages/schedules/SchedulesPage.jsx';
 import TimeOffPage from './pages/timeoff/TimeOffPage.jsx';
 
+/** `module` maps each destination to the permission matrix key that gates it. */
 const LINKS = [
-  { to: '/dashboard',  label: 'Dashboard' },
-  { to: '/employees',  label: 'Employees' },
-  { to: '/contracts',  label: 'Contracts' },
-  { to: '/attendance', label: 'Attendance' },
-  { to: '/time-off',   label: 'Time Off' },
-  { to: '/payroll',    label: 'Payroll' },
-  { to: '/config',     label: 'Configuration' },
+  { to: '/dashboard',  label: 'Dashboard',     module: 'dashboard' },
+  { to: '/employees',  label: 'Employees',     module: 'employees' },
+  { to: '/contracts',  label: 'Contracts',     module: 'contracts' },
+  { to: '/attendance', label: 'Attendance',    module: 'attendance' },
+  { to: '/time-off',   label: 'Time Off',      module: 'timeoff' },
+  { to: '/schedules',  label: 'Schedules',     module: 'schedules' },
+  { to: '/payroll',    label: 'Payroll',       module: 'payruns' },
+  { to: '/config',     label: 'Configuration', module: 'structures' },
+  { to: '/users',      label: 'Users',         module: 'users' },
 ];
 
-/** Demo role switcher — proves the RBAC matrix without a login screen. */
-function RoleSwitcher() {
-  const [users, setUsers] = useState([]);
-  const [current, setCurrent] = useState(getUserId());
+const ROLE_LABEL = {
+  employee: 'Employee',
+  hr_manager: 'HR Manager',
+  payroll_user: 'Payroll User',
+  payroll_manager: 'Payroll Manager',
+  admin: 'Admin',
+};
 
-  useEffect(() => { api.get('/users').then(setUsers).catch(() => {}); }, []);
+function AccountMenu() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onEsc);
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onEsc); };
+  }, []);
+
+  if (!user) return null;
+  const initials = user.name.split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
 
   return (
-    <select
-      className="select"
-      style={{ width: 'auto', minWidth: 190 }}
-      value={current}
-      onChange={(e) => { setUserId(e.target.value); setCurrent(e.target.value); window.location.reload(); }}
-    >
-      {users.map((u) => (
-        <option key={u.id} value={u.id}>{u.name} · {u.role.replace(/_/g, ' ')}</option>
-      ))}
-    </select>
+    <div className="account" ref={ref}>
+      <button className="account-trigger" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu">
+        <span className="avatar">{initials}</span>
+        <span className="account-text">
+          <span className="account-name">{user.name}</span>
+          <span className="account-role">{ROLE_LABEL[user.role] || user.role}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="account-menu" role="menu">
+          <div className="account-menu-head">
+            <div className="account-name">{user.name}</div>
+            <div className="meta">{user.email}</div>
+            <span className="badge badge-accent" style={{ marginTop: 8 }}>{ROLE_LABEL[user.role] || user.role}</span>
+          </div>
+          <button className="account-menu-item" role="menuitem" onClick={() => { setOpen(false); navigate('/change-password'); }}>
+            Change password
+          </button>
+          <button className="account-menu-item danger" role="menuitem" onClick={async () => { setOpen(false); await logout(); navigate('/login', { replace: true }); }}>
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The chrome only renders for a signed-in user; logged-out screens are bare. */
+function Shell({ children }) {
+  const { user, canRead } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  if (!user) return <>{children}</>;
+
+  const visible = LINKS.filter((l) => canRead(l.module));
+
+  return (
+    <div className="app">
+      <nav className="nav">
+        <div className="nav-inner">
+          <div className="brand">PeoplePay<span>360</span></div>
+          <div className="nav-links">
+            {visible.map((l) => (
+              <NavLink key={l.to} to={l.to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                {l.label}
+              </NavLink>
+            ))}
+          </div>
+          <div className="nav-right">
+            <button className="btn btn-sm nav-burger" onClick={() => setMobileOpen((o) => !o)} aria-label="Menu">Menu</button>
+            <AccountMenu />
+          </div>
+        </div>
+        {mobileOpen && (
+          <div className="nav-drawer">
+            {visible.map((l) => (
+              <NavLink key={l.to} to={l.to} onClick={() => setMobileOpen(false)}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+                {l.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
+      </nav>
+      <main>{children}</main>
+    </div>
+  );
+}
+
+/** Wraps a page in auth + role checks in one place. */
+const Guarded = ({ module, children }) => (
+  <RequireAuth><RequireRole module={module}>{children}</RequireRole></RequireAuth>
+);
+
+function AppRoutes() {
+  return (
+    <Shell>
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+        {/* Public */}
+        <Route path="/login"  element={<RedirectIfAuthed><LoginPage /></RedirectIfAuthed>} />
+        <Route path="/signup" element={<RedirectIfAuthed><SignupPage /></RedirectIfAuthed>} />
+        <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
+
+        <Route path="/dashboard" element={<Guarded module="dashboard"><Dashboard /></Guarded>} />
+
+        {/* Section 1 — Identity, Access & Employee Master */}
+        <Route path="/users/*"     element={<Guarded module="users"><Placeholder title="User Administration" owner="Section 1" /></Guarded>} />
+        <Route path="/employees/*" element={<Guarded module="employees"><Placeholder title="Employees" owner="Section 1" /></Guarded>} />
+
+        {/* Section 2 — Contracts, Time & Attendance */}
+        <Route path="/contracts/*"  element={<Guarded module="contracts"><ContractsPage /></Guarded>} />
+        <Route path="/attendance/*" element={<Guarded module="attendance"><AttendancePage /></Guarded>} />
+        <Route path="/schedules/*"  element={<Guarded module="schedules"><SchedulesPage /></Guarded>} />
+        <Route path="/time-off/*"   element={<Guarded module="timeoff"><TimeOffPage /></Guarded>} />
+
+        {/* Section 3 — Payroll, Payslips & Reporting */}
+        <Route path="/payroll/*" element={<Guarded module="payruns"><Placeholder title="Payroll" owner="Section 3" /></Guarded>} />
+        <Route path="/config/*"  element={<Guarded module="structures"><Placeholder title="Configuration" owner="Section 3" /></Guarded>} />
+
+        <Route path="*" element={<div className="state"><h3>Page not found</h3></div>} />
+      </Routes>
+    </Shell>
   );
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="app">
-        <nav className="nav">
-          <div className="nav-inner">
-            <div className="brand">PeoplePay<span>360</span></div>
-            <div className="nav-links">
-              {LINKS.map((l) => (
-                <NavLink key={l.to} to={l.to} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-                  {l.label}
-                </NavLink>
-              ))}
-            </div>
-            <div className="nav-right"><RoleSwitcher /></div>
-          </div>
-        </nav>
-
-        <main>
-          <Routes>
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-
-            {/* Section 1 — Identity, Access & Employee Master */}
-            <Route path="/login" element={<Placeholder title="Login" owner="Section 1" />} />
-            <Route path="/change-password" element={<Placeholder title="Change Password" owner="Section 1" />} />
-            <Route path="/users/*" element={<Placeholder title="User Administration" owner="Section 1" />} />
-            <Route path="/employees/*" element={<Placeholder title="Employees" owner="Section 1" />} />
-
-            {/* Section 2 — Contracts, Time & Attendance */}
-            <Route path="/contracts/*" element={<ContractsPage />} />
-            <Route path="/attendance/*" element={<AttendancePage />} />
-            <Route path="/schedules/*" element={<SchedulesPage />} />
-            <Route path="/time-off/*" element={<TimeOffPage />} />
-
-            {/* Section 3 — Payroll, Payslips & Reporting */}
-            <Route path="/payroll/*" element={<Placeholder title="Payroll" owner="Section 3" />} />
-            <Route path="/config/*" element={<Placeholder title="Configuration" owner="Section 3" />} />
-
-            <Route path="*" element={<div className="state"><h3>Page not found</h3></div>} />
-          </Routes>
-        </main>
-      </div>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

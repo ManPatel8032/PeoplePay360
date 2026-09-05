@@ -125,9 +125,22 @@ change password on first login.
 The full auth contract (endpoints, token rules, error shapes, schema additions) is frozen
 in [PLAN.md](PLAN.md#auth-contract) so all three sections can build against it in parallel.
 
-> Until Section 1 merges the auth work, the API still accepts the placeholder `x-user-id`
-> header. `frontend/src/api.js` swaps it for the Bearer token when auth lands — no other
-> file changes.
+### Signing up
+
+`/signup` is **not** open registration. A visitor can only create an account if their work
+email already exists on an `employees` record that has no user yet, and the account is
+always created with the `employee` role — a `role` in the request body is ignored, so
+nobody can self-elevate. Both failure cases return one identical message, so signup cannot
+be used to discover who works here. HR, payroll and admin accounts are created by an
+administrator.
+
+### Dev note
+
+The API still honours an `x-user-id` header outside production
+(`backend/src/auth.js`), which is handy for `curl`. The browser app no longer uses it —
+`frontend/src/api.js` sends the Bearer token and refreshes transparently on a 401.
+Downloads (the payslip PDF) go through `downloadFile()` as an authenticated blob, because a
+plain link would not carry the header.
 
 ## Ground rules
 
