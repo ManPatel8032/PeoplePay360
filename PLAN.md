@@ -10,18 +10,18 @@ and ignore the other two.
 
 | File | What it is |
 |---|---|
-| `server/src/schema.sql` | 15 tables, constraints, indexes. **Read this first.** |
-| `server/src/db.js` | `pg` pool, `query` / `one` / `tx` helpers, type parsers, `migrate()` |
-| `server/src/auth.js` | Role matrix + `can(module, action)` middleware — **Section 1 replaces the identity half of this** |
-| `server/src/lib/crud.js` | `crudRouter()` factory: list/get/create/update/delete for any table |
-| `server/src/lib/dates.js` | `weeklyHours`, `scheduledDays`, `overlapDays`, `daysBetween` |
-| `server/src/lib/payroll.js` | The rule engine: contract-for-period, period stats, sequenced rules, warnings |
-| `server/src/seed.js` | 6 months of demo data |
-| `client/src/styles.css` | Design tokens. Never write a raw colour anywhere else. |
-| `client/src/components/ui.jsx` | `useApi`, `States`, `Card`, `Kpi`, `Table`, `Badge`, `Field`, `Modal`, `Alert` |
-| `client/src/api.js` | `api.get/post/patch/del`, `qs()`, `money()` |
-| `client/src/pages/Dashboard.jsx` | Working vertical slice — copy its shape for your pages |
-| `server/test/logic.test.mjs` | `npm test` — date maths and salary formulas. Add cases as you go. |
+| `backend/src/schema.sql` | 15 tables, constraints, indexes. **Read this first.** |
+| `backend/src/db.js` | `pg` pool, `query` / `one` / `tx` helpers, type parsers, `migrate()` |
+| `backend/src/auth.js` | Role matrix + `can(module, action)` middleware — **Section 1 replaces the identity half of this** |
+| `backend/src/lib/crud.js` | `crudRouter()` factory: list/get/create/update/delete for any table |
+| `backend/src/lib/dates.js` | `weeklyHours`, `scheduledDays`, `overlapDays`, `daysBetween` |
+| `backend/src/lib/payroll.js` | The rule engine: contract-for-period, period stats, sequenced rules, warnings |
+| `backend/src/seed.js` | 6 months of demo data |
+| `frontend/src/styles.css` | Design tokens. Never write a raw colour anywhere else. |
+| `frontend/src/components/ui.jsx` | `useApi`, `States`, `Card`, `Kpi`, `Table`, `Badge`, `Field`, `Modal`, `Alert` |
+| `frontend/src/api.js` | `api.get/post/patch/del`, `qs()`, `money()` |
+| `frontend/src/pages/Dashboard.jsx` | Working vertical slice — copy its shape for your pages |
+| `backend/test/logic.test.mjs` | `npm test` — date maths and salary formulas. Add cases as you go. |
 
 Each section's route file exists as a **CRUD scaffold only**. The business logic,
 validation, and every screen is the actual work.
@@ -155,10 +155,10 @@ Branch from `main`, merge `main` into your branch **twice a day**, open a PR, ge
 
 | File | Protocol |
 |---|---|
-| `client/src/App.jsx` | **All routes get registered in hour 0–2, by Section 1, before anyone builds pages.** After that nobody edits it. You build behind a route that already exists. |
-| `server/src/index.js` | Same: all `app.use('/api/...')` mounts land in hour 0–2. Adding an endpoint *inside* your own route file needs no edit here. |
-| `server/src/schema.sql` | Section 1 lands the auth migration by hour 2. After that, any schema change is announced in chat and made by its section owner in a single-purpose PR. |
-| `client/src/styles.css` · `components/ui.jsx` · `api.js` | Additive only. Announce before editing. If you need a new shared component, add it here rather than making a local copy — but say so in chat first. |
+| `frontend/src/App.jsx` | **All routes get registered in hour 0–2, by Section 1, before anyone builds pages.** After that nobody edits it. You build behind a route that already exists. |
+| `backend/src/index.js` | Same: all `app.use('/api/...')` mounts land in hour 0–2. Adding an endpoint *inside* your own route file needs no edit here. |
+| `backend/src/schema.sql` | Section 1 lands the auth migration by hour 2. After that, any schema change is announced in chat and made by its section owner in a single-purpose PR. |
+| `frontend/src/styles.css` · `components/ui.jsx` · `api.js` | Additive only. Announce before editing. If you need a new shared component, add it here rather than making a local copy — but say so in chat first. |
 
 Everything else below is owned by exactly one person and touched by exactly one person.
 
@@ -171,13 +171,13 @@ Everything else below is owned by exactly one person and touched by exactly one 
 ### Files you own
 
 ```
-server/src/auth.js                     (rewrite: real tokens, keep can() signature)
-server/src/routes/auth.js              (new)
-server/src/routes/users.js             (new)
-server/src/routes/employees.js
-client/src/pages/auth/*                (new — Login, ChangePassword, RouteGuard)
-client/src/pages/users/*               (new — user + role admin)
-client/src/pages/employees/*
+backend/src/auth.js                     (rewrite: real tokens, keep can() signature)
+backend/src/routes/auth.js              (new)
+backend/src/routes/users.js             (new)
+backend/src/routes/employees.js
+frontend/src/pages/auth/*                (new — Login, ChangePassword, RouteGuard)
+frontend/src/pages/users/*               (new — user + role admin)
+frontend/src/pages/employees/*
 ```
 
 ### API you already have
@@ -193,10 +193,10 @@ GET/POST               /api/departments  /api/positions
 **Phase 1 — the hour 0–2 gate (do this before anything else, everyone is blocked on it)**
 
 1. Land the schema migration above, plus `bcryptjs`, `jsonwebtoken`, `cookie-parser`,
-   `express-rate-limit` in `server/package.json`.
+   `express-rate-limit` in `backend/package.json`.
 2. Update `seed.js` to hash the seeded passwords and set `must_change_password = true`.
-3. Register **all seven routes** in `client/src/App.jsx` and **all route mounts** in
-   `server/src/index.js`, pointing at the existing placeholder pages. Merge it.
+3. Register **all seven routes** in `frontend/src/App.jsx` and **all route mounts** in
+   `backend/src/index.js`, pointing at the existing placeholder pages. Merge it.
    From this moment Sections 2 and 3 never touch either file.
 4. Announce in chat: "auth contract live, App.jsx and index.js frozen."
 
@@ -226,7 +226,7 @@ GET/POST               /api/departments  /api/positions
 13. **Auth context + `<RequireAuth>` / `<RequireRole roles={[...]}>` route wrappers.**
     Unauthenticated → redirect to `/login` and return to the intended page after login.
     Wrong role → a clear "you don't have access" page, not a blank screen.
-14. **Token handling in `client/src/api.js`** (announce this edit — it is shared): attach
+14. **Token handling in `frontend/src/api.js`** (announce this edit — it is shared): attach
     the Bearer header, and on a `401` retry once through `/api/auth/refresh` before
     giving up. Access token in memory only; never `localStorage`.
 15. **Forced password change** — `must_change_password` redirects to the change screen and
@@ -270,14 +270,14 @@ smart buttons all work against live counts.
 ### Files you own
 
 ```
-server/src/routes/contracts.js
-server/src/routes/schedules.js
-server/src/routes/attendance.js
-server/src/routes/timeoff.js
-client/src/pages/contracts/*
-client/src/pages/attendance/*
-client/src/pages/schedules/*
-client/src/pages/timeoff/*
+backend/src/routes/contracts.js
+backend/src/routes/schedules.js
+backend/src/routes/attendance.js
+backend/src/routes/timeoff.js
+frontend/src/pages/contracts/*
+frontend/src/pages/attendance/*
+frontend/src/pages/schedules/*
+frontend/src/pages/timeoff/*
 ```
 
 ### API you already have
@@ -361,14 +361,14 @@ edit its day rows and are never entered by hand.
 ### Files you own
 
 ```
-server/src/routes/payroll.js
-server/src/routes/dashboard.js
-server/src/lib/payroll.js
-server/src/lib/pdf.js
-server/src/lib/mail.js
-client/src/pages/payroll/*
-client/src/pages/config/*
-client/src/pages/Dashboard.jsx
+backend/src/routes/payroll.js
+backend/src/routes/dashboard.js
+backend/src/lib/payroll.js
+backend/src/lib/pdf.js
+backend/src/lib/mail.js
+frontend/src/pages/payroll/*
+frontend/src/pages/config/*
+frontend/src/pages/Dashboard.jsx
 ```
 
 ### API you already have
