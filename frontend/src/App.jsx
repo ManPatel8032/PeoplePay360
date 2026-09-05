@@ -3,6 +3,10 @@ import { useEffect, useState } from 'react';
 import { api, getUserId, setUserId } from './api.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Placeholder from './pages/Placeholder.jsx';
+import ContractsPage from './pages/contracts/ContractsPage.jsx';
+import AttendancePage from './pages/attendance/AttendancePage.jsx';
+import SchedulesPage from './pages/schedules/SchedulesPage.jsx';
+import TimeOffPage from './pages/timeoff/TimeOffPage.jsx';
 
 const LINKS = [
   { to: '/dashboard',  label: 'Dashboard' },
@@ -65,10 +69,10 @@ export default function App() {
             <Route path="/employees/*" element={<Placeholder title="Employees" owner="Section 1" />} />
 
             {/* Section 2 — Contracts, Time & Attendance */}
-            <Route path="/contracts/*" element={<Placeholder title="Contracts" owner="Section 2" />} />
-            <Route path="/attendance/*" element={<Placeholder title="Attendance" owner="Section 2" />} />
-            <Route path="/schedules/*" element={<Placeholder title="Schedules" owner="Section 2" />} />
-            <Route path="/time-off/*" element={<Placeholder title="Time Off" owner="Section 2" />} />
+            <Route path="/contracts/*" element={<ContractsPage />} />
+            <Route path="/attendance/*" element={<AttendancePage />} />
+            <Route path="/schedules/*" element={<SchedulesPage />} />
+            <Route path="/time-off/*" element={<TimeOffPage />} />
 
             {/* Section 3 — Payroll, Payslips & Reporting */}
             <Route path="/payroll/*" element={<Placeholder title="Payroll" owner="Section 3" />} />
