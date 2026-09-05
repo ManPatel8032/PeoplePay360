@@ -16,6 +16,9 @@ const ATT_SQL = `
 
 // Current user's today status (for quick check-in/out widget)
 attendance.get('/today-status', can('attendance', 'read'), ah(async (req, res) => {
+  const role = req.user?.role;
+  if (role === 'admin') return res.json({ data: null });
+
   const empId = req.user?.employee_id;
   if (!empId) return res.json({ data: null });
 
@@ -29,8 +32,11 @@ attendance.get('/today-status', can('attendance', 'read'), ah(async (req, res) =
 
 // List attendance records
 attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
-  const employeeId = selfId || req.query.employee_id;
+  const role = req.user?.role;
+  const selfId = req.user?.employee_id;
+  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
+  const isHRManager = role === 'hr_manager';
+
   const status = req.query.status;
   const missingCheckout = req.query.missing_checkout === 'true' || req.query.missing_checkout === true;
   const search = req.query.search;
@@ -38,10 +44,27 @@ attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
   const where = [];
   const params = [];
 
-  if (employeeId) {
-    params.push(employeeId);
+  if (isSelfOnly) {
+    params.push(selfId || 0);
     where.push(`a.employee_id = $${params.length}`);
+  } else if (isHRManager) {
+    const employeeId = req.query.employee_id;
+    if (employeeId) {
+      params.push(employeeId, selfId || 0);
+      where.push(`a.employee_id = $${params.length - 1} AND (e.manager_id = $${params.length} OR a.employee_id = $${params.length})`);
+    } else {
+      params.push(selfId || 0);
+      where.push(`(e.manager_id = $${params.length} OR a.employee_id = $${params.length})`);
+    }
+  } else {
+    // Admin: can filter by employee_id if provided
+    const employeeId = req.query.employee_id;
+    if (employeeId) {
+      params.push(employeeId);
+      where.push(`a.employee_id = $${params.length}`);
+    }
   }
+
   if (status) {
     params.push(status);
     where.push(`a.status = $${params.length}`);
@@ -66,20 +89,52 @@ attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
 attendance.get('/:id', can('attendance', 'read'), ah(async (req, res) => {
   const row = await one(`${ATT_SQL} WHERE a.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const selfId = scopeToSelf(req);
-  if (selfId && row.employee_id !== selfId) {
+
+  const role = req.user?.role;
+  const selfId = req.user?.employee_id;
+  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
+  const isHRManager = role === 'hr_manager';
+
+  if (isSelfOnly && row.employee_id !== selfId) {
     return res.status(403).json({ error: 'Cannot view attendance for another employee' });
   }
+
+  if (isHRManager) {
+    const isAllowed = await one(
+      'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+      [row.employee_id, selfId]
+    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Cannot view attendance for an employee not under your management' });
+    }
+  }
+
   res.json({ data: row });
 }));
 
 // Quick check-in for current employee (or manager for another employee)
 attendance.post('/check-in', can('attendance', 'write'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
-  let employeeId = selfId;
-  if (!employeeId) {
-    employeeId = req.body.employee_id || req.user?.employee_id;
+  const role = req.user?.role;
+  if (role === 'admin') {
+    return res.status(403).json({ error: 'Admins do not clock in' });
   }
+  const selfId = req.user?.employee_id;
+  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
+  let employeeId = selfId;
+
+  if (!isSelfOnly && req.body.employee_id && Number(req.body.employee_id) !== Number(selfId)) {
+    if (role === 'hr_manager') {
+      const underManagement = await one(
+        'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+        [req.body.employee_id, selfId]
+      );
+      if (!underManagement) {
+        return res.status(403).json({ error: 'Cannot check in for an employee not under your management' });
+      }
+    }
+    employeeId = req.body.employee_id;
+  }
+
   if (!employeeId) return res.status(400).json({ error: 'No employee associated with this account' });
 
   // Check if open record already exists
@@ -106,8 +161,27 @@ attendance.post('/check-in', can('attendance', 'write'), ah(async (req, res) => 
 
 // Quick check-out for currently active record of caller
 attendance.post('/check-out', can('attendance', 'write'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
-  let employeeId = selfId || req.body.employee_id || req.user?.employee_id;
+  const role = req.user?.role;
+  if (role === 'admin') {
+    return res.status(403).json({ error: 'Admins do not clock out' });
+  }
+  const selfId = req.user?.employee_id;
+  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
+  let employeeId = selfId;
+
+  if (!isSelfOnly && req.body.employee_id && Number(req.body.employee_id) !== Number(selfId)) {
+    if (role === 'hr_manager') {
+      const underManagement = await one(
+        'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+        [req.body.employee_id, selfId]
+      );
+      if (!underManagement) {
+        return res.status(403).json({ error: 'Cannot check out for an employee not under your management' });
+      }
+    }
+    employeeId = req.body.employee_id;
+  }
+
   if (!employeeId) return res.status(400).json({ error: 'No employee specified' });
 
   const open = await one(
@@ -136,9 +210,23 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
   if (!row) return res.status(404).json({ error: 'Not found' });
   if (row.check_out) return res.status(400).json({ error: 'Already checked out' });
 
-  const selfId = scopeToSelf(req);
-  if (selfId && row.employee_id !== selfId) {
+  const role = req.user?.role;
+  const selfId = req.user?.employee_id;
+  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
+  const isHRManager = role === 'hr_manager';
+
+  if (isSelfOnly && row.employee_id !== selfId) {
     return res.status(403).json({ error: 'Cannot check out for another employee' });
+  }
+
+  if (isHRManager) {
+    const isAllowed = await one(
+      'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+      [row.employee_id, selfId]
+    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Cannot check out for an employee not under your management' });
+    }
   }
 
   const h = hoursBetween(row.check_in, at);
@@ -155,14 +243,33 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
 
 // Create attendance manually
 attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
+  const role = req.user?.role;
+  const selfId = req.user?.employee_id;
+  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
+  const isHRManager = role === 'hr_manager';
+
+  if (role === 'admin') {
+    return res.status(403).json({ error: 'Admins do not log individual attendance entries' });
+  }
+
   let { employee_id, check_in, check_out, status = 'present', notes } = req.body;
 
-  // An employee may only ever log attendance against themselves, whatever the
-  // body says. This assignment is the only thing enforcing that.
-  if (selfId) {
+  if (isSelfOnly) {
     employee_id = selfId;
+  } else if (isHRManager) {
+    if (!employee_id) {
+      employee_id = selfId;
+    } else if (Number(employee_id) !== Number(selfId)) {
+      const underManagement = await one(
+        'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+        [employee_id, selfId]
+      );
+      if (!underManagement) {
+        return res.status(403).json({ error: 'You can only log attendance for yourself or employees under your management' });
+      }
+    }
   }
+
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
   if (!check_in) return res.status(400).json({ error: 'Check-in time is required' });
 
@@ -176,7 +283,7 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
     }
   }
 
-  const isManual = Boolean(req.body.manual_edit || req.user?.role !== 'employee');
+  const isManual = Boolean(req.body.manual_edit || role !== 'employee');
 
   const inserted = await one(
     `INSERT INTO attendance (employee_id, check_in, check_out, status, manual_edit, notes)
@@ -188,17 +295,47 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
   res.status(201).json({ data: full });
 }));
 
-// Correct attendance (restricted to HR Manager and above)
+// Correct attendance (restricted to HR Manager and above, or Payroll editing self)
 attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
-  // Requirement: "Corrections set manual_edit and are restricted to HR Manager and above; an Employee may create their own entry but not edit anyone else's."
   if (req.user?.role === 'employee') {
-    return res.status(403).json({ error: 'Only HR Managers and Admins can correct attendance records' });
+    return res.status(403).json({ error: 'Employees cannot correct attendance records' });
   }
 
   const existing = await one('SELECT * FROM attendance WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
-  const employee_id = req.body.employee_id !== undefined ? req.body.employee_id : existing.employee_id;
+  const role = req.user?.role;
+  const selfId = req.user?.employee_id;
+  const isHRManager = role === 'hr_manager';
+  const isPayroll = role === 'payroll_user' || role === 'payroll_manager';
+
+  if (isPayroll && existing.employee_id !== selfId) {
+    return res.status(403).json({ error: 'Cannot edit attendance for another employee' });
+  }
+
+  if (isHRManager) {
+    const isAllowed = await one(
+      'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+      [existing.employee_id, selfId]
+    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Cannot correct attendance for an employee not under your management' });
+    }
+  }
+
+  let employee_id = req.body.employee_id !== undefined ? req.body.employee_id : existing.employee_id;
+  if (isPayroll) {
+    employee_id = selfId;
+  } else if (isHRManager && employee_id) {
+    const isAllowed = await one(
+      'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+      [employee_id, selfId]
+    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Cannot assign attendance to an employee not under your management' });
+    }
+  }
+
   const check_in = req.body.check_in !== undefined ? req.body.check_in : existing.check_in;
   const check_out = req.body.check_out !== undefined ? req.body.check_out : existing.check_out;
   let status = req.body.status !== undefined ? req.body.status : existing.status;
@@ -227,6 +364,18 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
 
 // Delete attendance record
 attendance.delete('/:id', can('employees', 'write'), ah(async (req, res) => {
+  if (req.user?.role === 'hr_manager') {
+    const existing = await one('SELECT employee_id FROM attendance WHERE id = $1', [req.params.id]);
+    if (existing) {
+      const isAllowed = await one(
+        'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+        [existing.employee_id, req.user?.employee_id]
+      );
+      if (!isAllowed) {
+        return res.status(403).json({ error: 'Cannot delete attendance for an employee not under your management' });
+      }
+    }
+  }
   await query('DELETE FROM attendance WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));
