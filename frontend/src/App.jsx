@@ -10,6 +10,7 @@ import ChangePasswordPage from './pages/auth/ChangePasswordPage.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Placeholder from './pages/Placeholder.jsx';
 import EmployeesPage from './pages/employees/EmployeesPage.jsx';
+import UsersPage from './pages/users/UsersPage.jsx';
 import PayrollIndex from './pages/payroll/PayrollIndex.jsx';
 import ConfigIndex from './pages/config/ConfigIndex.jsx';
 import ContractsPage from './pages/contracts/ContractsPage.jsx';
@@ -150,7 +151,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<Guarded module="dashboard"><Dashboard /></Guarded>} />
 
         {/* Section 1 — Identity, Access & Employee Master */}
-        <Route path="/users/*"     element={<Guarded module="users"><Placeholder title="User Administration" owner="Section 1" /></Guarded>} />
+        <Route path="/users/*"     element={<Guarded module="users"><UsersPage /></Guarded>} />
         <Route path="/employees/*" element={<Guarded module="employees"><EmployeesPage /></Guarded>} />
 
         {/* Section 2 — Contracts, Time & Attendance */}

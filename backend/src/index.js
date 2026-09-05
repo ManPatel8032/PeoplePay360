@@ -56,8 +56,45 @@ app.use('/api/payslips', payroll.payslips);
 app.use('/api/dashboard', dashboard);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+
+/**
+ * A rejected constraint is the caller sending bad data, not the server
+ * failing — surface those as 400 rather than leaking a 500 and a raw
+ * Postgres message.
+ */
+const PG_BAD_REQUEST = {
+  '23514': 'check_violation',
+  '23505': 'unique_violation',
+  '23503': 'foreign_key_violation',
+  '23502': 'not_null_violation',
+  '22001': 'string_too_long',
+  '22007': 'invalid_datetime',
+  '22P02': 'invalid_text_representation',
+};
+
+function friendlyDbError(err) {
+  switch (err.code) {
+    case '23505':
+      return 'That value is already in use';
+    case '23503':
+      return 'A referenced record does not exist';
+    case '23502':
+      return `${err.column ? `"${err.column}"` : 'A required field'} cannot be empty`;
+    case '22P02':
+    case '22007':
+      return 'A value has the wrong format';
+    default:
+      // CHECK constraints and RAISE EXCEPTION carry their own readable text.
+      return err.message;
+  }
+}
+
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
+  if (err?.code && PG_BAD_REQUEST[err.code]) {
+    console.warn(`[400] ${err.code} ${err.message}`);
+    return res.status(400).json({ error: friendlyDbError(err), code: err.code });
+  }
   console.error(err);
   res.status(err.status || 500).json({ error: err.message || 'Server error' });
 });

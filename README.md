@@ -106,10 +106,27 @@ Connection string lives in `.env` (copy from `.env.example`).
 
 ## What the seed gives you
 
-14 employees across 5 departments, contract history including a mid-period renewal
+15 employees across 6 departments, contract history including a mid-period renewal
 (so period-based contract selection is visible), 3 working schedules, 4 time-off types
 with allocations, ~6 months of attendance, 5 paid monthly payruns plus **one draft
 payrun for the current month** — that draft is what you Compute live during the demo.
+
+### Org chart
+
+Every employee reports to someone. The Managing Director is the single root — the only
+person whose `manager_id` is NULL — and department heads report to her, so managers have
+managers too. The database enforces this with a no-self-manager constraint and a
+cycle-detection trigger; `employee_hierarchy` is a view giving each person's level, path
+and direct-report count.
+
+```
+Rohini Deshpande  (MD)
+├── Aarav Sharma      Engineering  → Priya, Rohan, Sneha, Tara
+├── Vikram Rao        Sales        → Ananya, Kabir
+├── Meera Joshi       HR           → Devansh
+├── Arjun Patel       Finance      → Ishita
+└── Nisha Verma       Operations   → Farhan
+```
 
 ## Authentication & roles
 
@@ -118,9 +135,38 @@ cookie with rotation, rate limiting, and account lockout. Every route is guarded
 server-side by the permission matrix in [`backend/src/auth.js`](backend/src/auth.js), and
 the client hides nav items the current role cannot read.
 
-Seeded accounts cover all five roles — Employee, HR Manager, Payroll User, Payroll
-Manager, Admin. Dev passwords are in `.env.example`; the seeded accounts are forced to
-change password on first login.
+### Seeded logins
+
+All use the dev password from `.env.example` and are forced to change it at first login.
+
+| Email | Role | Who they are |
+|---|---|---|
+| `admin@peoplepay360.com` | Admin | **No employee record** — an IT account with no contract or payslip |
+| `rohini.md@peoplepay360.com` | Admin | Managing Director, root of the org chart |
+| `meera.hr@peoplepay360.com` | HR Manager | Heads HR |
+| `arjun.pay@peoplepay360.com` | Payroll Manager | Heads Finance |
+| `ishita.pay@peoplepay360.com` | Payroll User | Reports to Arjun |
+| `aarav.emp@peoplepay360.com` | Employee | **Manages 4 people** |
+| `vikram.emp@peoplepay360.com` | Employee | **Manages 2 people** |
+| `nisha.emp@peoplepay360.com` | Employee | **Manages 1 person** |
+| `priya.emp@peoplepay360.com` | Employee | Individual contributor |
+
+**Employees and users are deliberately not one-to-one.** Seven employees have no login at
+all — plenty of real staff are paid without ever signing in — and `admin@` is a user with
+no employee record. Aarav, Vikram and Nisha manage teams while holding the plain
+`employee` role, which is the clearest demonstration that **being a manager is a position
+in the org chart, not a permission level**.
+
+### Admin-only rules
+
+Two rules sit above the role matrix, because the person who would normally hold the
+permission has a conflict of interest ([`backend/src/lib/guards.js`](backend/src/lib/guards.js)):
+
+1. **A manager's own attendance** can only be reviewed, corrected or deleted by an Admin —
+   not by HR or a peer. "Manager" is derived live from direct reports.
+2. **The pay of payroll staff** (`payroll_user`, `payroll_manager`) can only be set by an
+   Admin. Non-pay contract edits stay open to HR, so this locks pay decisions rather than
+   the whole record.
 
 The full auth contract (endpoints, token rules, error shapes, schema additions) is frozen
 in [PLAN.md](PLAN.md#auth-contract) so all three sections can build against it in parallel.
