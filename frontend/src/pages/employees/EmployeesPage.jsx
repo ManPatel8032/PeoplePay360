@@ -27,6 +27,7 @@ export default function EmployeesPage() {
 
   const canReadScope = can('employees', 'read');
   const canWriteEmployees = can('employees', 'write') !== 'none';
+  const canDeleteEmployees = can('employees', 'delete') !== 'none';
   const isEmployeeSelfScope = canReadScope === 'own';
 
   // Load reference departments
@@ -114,6 +115,21 @@ export default function EmployeesPage() {
     }
   };
 
+  const handleDeleteEmployee = async (emp) => {
+    if (!confirm(`Permanently delete employee "${emp.name}" (${emp.employee_number || emp.id})? This will also remove their unfinalized contracts and attendance records. This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await api.del(`/employees/${emp.id}`);
+      if (selectedEmployee?.id === emp.id) {
+        setSelectedEmployee(null);
+      }
+      reload();
+    } catch (err) {
+      alert(err.message || 'Failed to delete employee');
+    }
+  };
+
   return (
     <div>
       {selectedEmployee ? (
@@ -122,6 +138,7 @@ export default function EmployeesPage() {
           initialEmployee={selectedEmployee}
           onClose={() => setSelectedEmployee(null)}
           onEdit={handleOpenEdit}
+          onDelete={handleDeleteEmployee}
         />
       ) : (
         <>
@@ -248,6 +265,8 @@ export default function EmployeesPage() {
               <EmployeeList
                 employees={filteredEmployees}
                 onSelectEmployee={(emp) => setSelectedEmployee(emp)}
+                canDelete={canDeleteEmployees}
+                onDeleteEmployee={handleDeleteEmployee}
               />
             ) : (
               <EmployeeKanban

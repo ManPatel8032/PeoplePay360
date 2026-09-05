@@ -6,9 +6,13 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, qs, money } from '../../api.js';
 import { useApi, States, Table, Badge, empNumberColumn, SearchInput } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import PayslipDetail from './PayslipDetail.jsx';
 
 export default function PayslipList() {
+  const { can } = useAuth();
+  const canDeleteSlip = can('payslips', 'delete') !== 'none';
+
   const [searchParams, setSearchParams] = useSearchParams();
   const urlState = searchParams.get('state') || '';
   const urlSearch = searchParams.get('search') || '';
@@ -28,6 +32,17 @@ export default function PayslipList() {
   );
 
   const set = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
+
+  const deleteSlip = async (r, e) => {
+    e.stopPropagation();
+    if (!confirm(`Permanently delete payslip for ${r.employee_name}? This cannot be undone.`)) return;
+    try {
+      await api.del(`/payslips/${r.id}`);
+      reload();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
   const visible = useMemo(() => {
     if (!data) return [];
@@ -55,6 +70,20 @@ export default function PayslipList() {
     { key: 'net', label: 'Net', align: 'right', render: (r) => <strong>{money(r.net)}</strong> },
     { key: 'state', label: 'State', render: (r) => <Badge value={r.state} /> },
     { key: 'sent_at', label: 'Sent', render: (r) => r.sent_at ? '✓' : '—' },
+    ...(canDeleteSlip ? [{
+      key: 'actions',
+      label: '',
+      align: 'right',
+      render: (r) => (!['validated', 'paid'].includes(r.state) ? (
+        <button
+          className="btn btn-sm btn-danger"
+          style={{ padding: '2px 8px', minHeight: 26, fontSize: 12 }}
+          onClick={(e) => deleteSlip(r, e)}
+        >
+          Delete
+        </button>
+      ) : null),
+    }] : []),
   ];
 
   return (

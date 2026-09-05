@@ -5,9 +5,14 @@
 import { useState } from 'react';
 import { api, qs, money } from '../../api.js';
 import { useApi, States, Table, Badge, SearchInput } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import PayrunWizardModal from './PayrunWizardModal.jsx';
 
 export default function PayrunList({ onSelect }) {
+  const { can } = useAuth();
+  const canDeleteRun = can('payruns', 'delete') !== 'none';
+  const canCreateRun = can('payruns', 'write') !== 'none';
+
   const [showWizard, setShowWizard] = useState(false);
   const [filters, setFilters] = useState({ state: '', structure_id: '', search: '' });
 
@@ -18,6 +23,17 @@ export default function PayrunList({ onSelect }) {
 
   const set = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
 
+  const deleteRun = async (r, e) => {
+    e.stopPropagation();
+    if (!confirm(`Permanently delete payrun "${r.name}"? This cannot be undone.`)) return;
+    try {
+      await api.del(`/payruns/${r.id}`);
+      reload();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const columns = [
     { key: 'name', label: 'Name' },
     { key: 'structure_name', label: 'Structure' },
@@ -26,6 +42,20 @@ export default function PayrunList({ onSelect }) {
     { key: 'state', label: 'State', render: (r) => <Badge value={r.state} /> },
     { key: 'payslip_count', label: 'Payslips', align: 'right' },
     { key: 'total_net', label: 'Total Net', align: 'right', render: (r) => money(r.total_net) },
+    ...(canDeleteRun ? [{
+      key: 'actions',
+      label: '',
+      align: 'right',
+      render: (r) => (!['validated', 'paid'].includes(r.state) ? (
+        <button
+          className="btn btn-sm btn-danger"
+          style={{ padding: '2px 8px', minHeight: 26, fontSize: 12 }}
+          onClick={(e) => deleteRun(r, e)}
+        >
+          Delete
+        </button>
+      ) : null),
+    }] : []),
   ];
 
   return (
@@ -35,7 +65,7 @@ export default function PayrunList({ onSelect }) {
           <h2>Payruns</h2>
           <p className="meta">Batch payroll processing — create, compute, validate, and disburse</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowWizard(true)}>+ New Payrun</button>
+        {canCreateRun && <button className="btn btn-primary" onClick={() => setShowWizard(true)}>+ New Payrun</button>}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>

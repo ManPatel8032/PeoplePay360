@@ -3,14 +3,19 @@
  * in sequence order, contract used, worked/leave days, and PDF download.
  */
 import { useState } from 'react';
-import { api, money, moneyExact } from '../../api.js';
+import { api, downloadFile, money, moneyExact } from '../../api.js';
 import { useApi, States, Card, Table, Badge, Alert } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 const CAT_LABEL = { BASIC: 'Basic', ALW: 'Allowance', GROSS: 'Gross', DED: 'Deduction', NET: 'Net' };
 
 export default function PayslipDetail({ payslipId, onBack }) {
+  const { can } = useAuth();
+  const canDeleteSlip = can('payslips', 'delete') !== 'none';
+
   const [downloading, setDownloading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
 
   const { data: slip, loading, error, reload } = useApi(
@@ -20,15 +25,7 @@ export default function PayslipDetail({ payslipId, onBack }) {
   const downloadPdf = async () => {
     setDownloading(true);
     try {
-      const res = await fetch(`/api/payslips/${payslipId}/pdf`, {
-        headers: { 'x-user-id': String(localStorage.getItem('pp360.userId') || 1) },
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || 'Download failed');
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const url = await downloadFile(`/payslips/${payslipId}/pdf`);
       const a = document.createElement('a');
       a.href = url;
       a.download = `payslip-${slip.employee_name.replace(/\W+/g, '-')}-${slip.period_start}.pdf`;
@@ -51,6 +48,18 @@ export default function PayslipDetail({ payslipId, onBack }) {
       setSendMsg(`✗ ${e.message}`);
     } finally {
       setSending(false);
+    }
+  };
+
+  const deletePayslip = async () => {
+    if (!confirm(`Permanently delete payslip for ${slip?.employee_name}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await api.del(`/payslips/${payslipId}`);
+      onBack();
+    } catch (e) {
+      alert(e.message);
+      setDeleting(false);
     }
   };
 
@@ -95,6 +104,11 @@ export default function PayslipDetail({ payslipId, onBack }) {
             <button className="btn" onClick={sendEmail} disabled={sending}>
               {sending ? 'Sending…' : '📧 Email'}
             </button>
+            {canDeleteSlip && !['validated', 'paid'].includes(slip.state) && (
+              <button className="btn btn-danger" onClick={deletePayslip} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete Payslip'}
+              </button>
+            )}
           </div>
         )}
       </div>

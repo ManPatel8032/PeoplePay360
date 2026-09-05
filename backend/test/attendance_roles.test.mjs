@@ -201,5 +201,87 @@ test('attendance missing filter: resolves missing_checkout query and status para
   assert.equal(isMissing({ status: 'present' }), false);
   assert.equal(isMissing({}), false);
 });
+test('schedules: payroll user and payroll manager are read-only, cannot edit schedules', () => {
+  assert.equal(MATRIX.schedules.payroll_user.read, 'all');
+  assert.equal(MATRIX.schedules.payroll_user.write, 'none');
+  assert.equal(MATRIX.schedules.payroll_user.delete, 'none');
+  assert.equal(MATRIX.schedules.payroll_manager.read, 'all');
+  assert.equal(MATRIX.schedules.payroll_manager.write, 'none');
+  assert.equal(MATRIX.schedules.payroll_manager.delete, 'none');
+  assert.equal(MATRIX.schedules.hr_manager.write, 'all');
+  assert.equal(MATRIX.schedules.admin.write, 'all');
+});
+
+test('payroll_user has all HR Manager permissions plus Create, Read, Update on payruns and payslips', () => {
+  // 1. HR Manager core operational modules: payroll_user has full read/write
+  const hrModules = ['employees', 'contracts', 'attendance', 'timeoff', 'timeoff_approve', 'allocations'];
+  for (const mod of hrModules) {
+    assert.equal(MATRIX[mod].payroll_user.read, 'all', `payroll_user should read all ${mod}`);
+    assert.equal(MATRIX[mod].payroll_user.write, 'all', `payroll_user should write all ${mod}`);
+  }
+
+  // 2. Payruns: payroll_user has Create, Read, and Update (CRU), but NOT delete
+  assert.equal(MATRIX.payruns.payroll_user.read, 'all', 'payroll_user can read all payruns');
+  assert.equal(MATRIX.payruns.payroll_user.write, 'all', 'payroll_user can create and update payruns');
+  assert.equal(MATRIX.payruns.payroll_user.delete, 'none', 'payroll_user cannot delete payruns');
+
+  // 3. Payslips: payroll_user has Create, Read, and Update (CRU), but NOT delete
+  assert.equal(MATRIX.payslips.payroll_user.read, 'all', 'payroll_user can read all payslips');
+  assert.equal(MATRIX.payslips.payroll_user.write, 'all', 'payroll_user can create and update payslips');
+  assert.equal(MATRIX.payslips.payroll_user.delete, 'none', 'payroll_user cannot delete payslips');
+
+  // 4. HR Manager is completely shut out of payruns and payslips
+  assert.equal(MATRIX.payruns.hr_manager.read, 'none', 'hr_manager cannot read payruns');
+  assert.equal(MATRIX.payruns.hr_manager.write, 'none', 'hr_manager cannot write payruns');
+  assert.equal(MATRIX.payslips.hr_manager.read, 'none', 'hr_manager cannot read payslips');
+  assert.equal(MATRIX.payslips.hr_manager.write, 'none', 'hr_manager cannot write payslips');
+});
+
+test('payroll_manager has full CRUD on payruns, payslips, structures, rules and full HR operational control', () => {
+  // 1. Full CRUD on all payroll & configuration modules
+  const payrollModules = ['payruns', 'payslips', 'structures', 'rules'];
+  for (const mod of payrollModules) {
+    assert.equal(MATRIX[mod].payroll_manager.read, 'all', `payroll_manager should read all ${mod}`);
+    assert.equal(MATRIX[mod].payroll_manager.write, 'all', `payroll_manager should write all ${mod}`);
+    assert.equal(MATRIX[mod].payroll_manager.delete, 'all', `payroll_manager should delete all ${mod}`);
+  }
+
+  // 2. Full control on HR operational records
+  const hrModules = ['employees', 'contracts', 'attendance', 'timeoff', 'timeoff_approve', 'allocations'];
+  for (const mod of hrModules) {
+    assert.equal(MATRIX[mod].payroll_manager.read, 'all', `payroll_manager should read all ${mod}`);
+    assert.equal(MATRIX[mod].payroll_manager.write, 'all', `payroll_manager should write all ${mod}`);
+    assert.equal(MATRIX[mod].payroll_manager.delete, 'all', `payroll_manager should delete all ${mod}`);
+  }
+
+  // 3. Schedules: read-only (cannot edit)
+  assert.equal(MATRIX.schedules.payroll_manager.read, 'all', 'payroll_manager can read schedules');
+  assert.equal(MATRIX.schedules.payroll_manager.write, 'none', 'payroll_manager cannot edit schedules');
+  assert.equal(MATRIX.schedules.payroll_manager.delete, 'none', 'payroll_manager cannot delete schedules');
+
+  // 4. Distinction from payroll_user (who has no delete on payruns/payslips and no write/delete on structures/rules)
+  assert.equal(MATRIX.payruns.payroll_user.delete, 'none');
+  assert.equal(MATRIX.payslips.payroll_user.delete, 'none');
+  assert.equal(MATRIX.structures.payroll_user.write, 'none');
+  assert.equal(MATRIX.rules.payroll_user.write, 'none');
+
+  // 5. Dashboard and Users
+  assert.equal(MATRIX.dashboard.payroll_manager.read, 'all', 'payroll_manager can view payroll dashboard');
+  assert.equal(MATRIX.users.payroll_manager.read, 'none', 'payroll_manager cannot administer user accounts');
+});
+
+test('hr_manager and admin have Delete operation on employees and contracts', () => {
+  // hr_manager has delete on employees and contracts
+  assert.equal(MATRIX.employees.hr_manager.delete, 'all', 'hr_manager can delete employees');
+  assert.equal(MATRIX.contracts.hr_manager.delete, 'all', 'hr_manager can delete contracts');
+
+  // admin has delete on employees and contracts
+  assert.equal(MATRIX.employees.admin.delete, 'all', 'admin can delete employees');
+  assert.equal(MATRIX.contracts.admin.delete, 'all', 'admin can delete contracts');
+
+  // employee cannot delete employees or contracts
+  assert.equal(MATRIX.employees.employee.delete, 'none', 'employee cannot delete employees');
+  assert.equal(MATRIX.contracts.employee.delete, 'none', 'employee cannot delete contracts');
+});
 
 

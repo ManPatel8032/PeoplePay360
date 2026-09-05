@@ -64,8 +64,24 @@ export default function PayrunDetail({ payrunId, onBack }) {
   const actionDef = run ? ACTIONS[run.state] : null;
   const { can } = useAuth();
   const canRunPayroll = can('payruns', 'write') !== 'none';
+  const canDeleteRun = can('payruns', 'delete') !== 'none' && run && ['draft', 'computed'].includes(run.state);
+  const canDeleteSlip = can('payslips', 'delete') !== 'none' && run && ['draft', 'computed'].includes(run.state);
   const isPaidOrValidated = run && ['validated', 'paid'].includes(run.state);
   const canSend = run && ['validated', 'paid'].includes(run.state);
+
+  const deletePayrun = async () => {
+    if (!confirm('Are you sure you want to delete this payrun? This cannot be undone.')) return;
+    setActing('delete');
+    setActionErr('');
+    try {
+      await api.del(`/payruns/${payrunId}`);
+      onBack();
+    } catch (e) {
+      setActionErr(e.message);
+    } finally {
+      setActing('');
+    }
+  };
 
   // Collect all warnings across payslips, grouped by employee
   const allWarnings = (run?.payslips || []).flatMap((p) =>
@@ -97,6 +113,31 @@ export default function PayrunDetail({ payrunId, onBack }) {
         </span>
       );
     }},
+    ...(canDeleteSlip ? [{
+      key: 'remove',
+      label: '',
+      align: 'right',
+      render: (r) => (
+        <button
+          type="button"
+          className="btn btn-sm btn-danger"
+          style={{ padding: '2px 8px', minHeight: 24, fontSize: 12 }}
+          title="Remove from payrun"
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (!confirm(`Remove ${r.employee_name} from this payrun?`)) return;
+            try {
+              await api.del(`/payslips/${r.id}`);
+              reload();
+            } catch (err) {
+              setActionErr(err.message);
+            }
+          }}
+        >
+          ✕
+        </button>
+      ),
+    }] : []),
   ];
 
   return (
@@ -183,6 +224,14 @@ export default function PayrunDetail({ payrunId, onBack }) {
                     {acting === 'send' ? 'Sending…' : '📧 Send Payslips'}
                   </button>
                   <div className="meta" style={{ marginTop: 4 }}>Email PDF payslips to all employees</div>
+                </div>
+              )}
+              {canDeleteRun && (
+                <div>
+                  <button className="btn btn-danger" onClick={deletePayrun} disabled={!!acting}>
+                    {acting === 'delete' ? 'Deleting…' : 'Delete Payrun'}
+                  </button>
+                  <div className="meta" style={{ marginTop: 4 }}>Permanently delete this unvalidated run</div>
                 </div>
               )}
               {run.state === 'draft' && (

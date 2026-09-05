@@ -10,6 +10,7 @@ const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function TimeOffPage() {
   const { user, can } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const isEmployee = user?.role === 'employee';
   const canApprove = can('timeoff_approve', 'write') !== 'none';
   const canWriteAllocations = can('allocations', 'write') === 'all';
@@ -601,7 +602,7 @@ export default function TimeOffPage() {
           </p>
         </div>
         <div className="row">
-          {activeTab === 'requests' && (
+          {activeTab === 'requests' && !isAdmin && (
             <button className="btn btn-primary" onClick={openNewRequestModal}>
               + Request Time Off
             </button>

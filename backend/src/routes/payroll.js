@@ -65,7 +65,7 @@ export const rules = crudRouter({
 
 
 /** Dry-run a rule set against a sample context so config screens are not blind. */
-rules.post('/preview', can('rules', 'read'), ah(async (req, res) => {
+rules.post('/preview', can('rules', 'write'), ah(async (req, res) => {
   const { structure_id, employee_id, period_start, period_end } = req.body;
   const employee = await one('SELECT * FROM employees WHERE id = $1', [employee_id]);
   if (!employee) return res.status(400).json({ error: 'Pick an employee to preview against' });
@@ -282,14 +282,14 @@ payruns.post('/:id/send-payslips', can('payruns', 'write'), ah(async (req, res) 
 export const payslips = Router();
 
 /** A payslip is visible if its employee is inside the caller's scope. */
-const enforceSelfScope = (req, slip) => canSeeEmployee(req, slip.employee_id);
+const enforceSelfScope = (req, slip) => canSeeEmployee(req, slip.employee_id, 'payslips');
 
 payslips.get('/', can('payslips', 'read'), ah(async (req, res) => {
   const params = [];
   const where = [];
 
   // Managers see their subtree's payslips; ICs see only their own.
-  const scopeSql = await employeeScopeFilter(req, 'ps.employee_id', params);
+  const scopeSql = await employeeScopeFilter(req, 'ps.employee_id', params, 'payslips');
   if (scopeSql) where.push(scopeSql);
 
   for (const [q, col] of Object.entries({ payrun_id: 'ps.payrun_id', employee_id: 'ps.employee_id', state: 'ps.state' })) {
@@ -342,3 +342,20 @@ payslips.post('/:id/send', can('payslips', 'write'), ah(async (req, res) => {
   await query('UPDATE payslips SET sent_at = now() WHERE id = $1', [slip.id]);
   res.json({ data: info });
 }));
+
+payslips.delete('/:id', can('payslips', 'delete'), ah(async (req, res) => {
+  const slip = await one(
+    `SELECT ps.id, ps.state, pr.state AS run_state
+       FROM payslips ps
+       LEFT JOIN payruns pr ON pr.id = ps.payrun_id
+      WHERE ps.id = $1`,
+    [req.params.id]
+  );
+  if (!slip) return res.status(404).json({ error: 'Not found' });
+  if (['validated', 'paid'].includes(slip.state) || ['validated', 'paid'].includes(slip.run_state)) {
+    return res.status(400).json({ error: 'Cannot delete a payslip from a validated or paid payrun' });
+  }
+  await query('DELETE FROM payslips WHERE id = $1', [req.params.id]);
+  res.status(204).end();
+}));
+

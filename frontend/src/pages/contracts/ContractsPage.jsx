@@ -23,6 +23,7 @@ export default function ContractsPage() {
 
   const isEmployee = user?.role === 'employee';
   const canWrite = can('contracts', 'write') !== 'none';
+  const canDelete = can('contracts', 'delete') !== 'none';
 
   const employeeIdFilter = searchParams.get('employee_id') || '';
   const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
@@ -262,6 +263,23 @@ export default function ContractsPage() {
     }
   };
 
+  const deleteContract = async (contract, e) => {
+    e?.stopPropagation?.();
+    if (!confirm(`Permanently delete contract "${contract.name}" for ${contract.employee_name}? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      await api.del(`/contracts/${contract.id}`);
+      if (editingContract?.id === contract.id) {
+        setModalOpen(false);
+        setEditingContract(null);
+      }
+      reload();
+    } catch (err) {
+      alert(err.message || 'Failed to delete contract');
+    }
+  };
+
   const columns = useMemo(() => [
     {
       key: 'name',
@@ -332,7 +350,21 @@ export default function ContractsPage() {
       label: 'State',
       render: (r) => <Badge value={r.state} />,
     },
-  ], [setSearchParams]);
+    ...(canDelete ? [{
+      key: 'actions',
+      label: '',
+      align: 'right',
+      render: (r) => (
+        <button
+          className="btn btn-sm btn-danger"
+          style={{ padding: '2px 8px', minHeight: 26, fontSize: 12 }}
+          onClick={(e) => deleteContract(r, e)}
+        >
+          Delete
+        </button>
+      ),
+    }] : []),
+  ], [setSearchParams, canDelete]);
 
   return (
     <>
@@ -697,19 +729,33 @@ export default function ContractsPage() {
 
             </fieldset>
 
-            <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
-              <button type="button" className="btn" onClick={() => setModalOpen(false)}>
-                {canWrite ? 'Cancel' : 'Close'}
-              </button>
-              {canWrite && (
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={saving || Boolean(overlapWarning)}
-                >
-                  {saving ? 'Saving...' : editingContract ? 'Update Contract' : 'Create Contract'}
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+              <div>
+                {editingContract && canDelete && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={(e) => deleteContract(editingContract, e)}
+                    disabled={saving}
+                  >
+                    Delete Contract
+                  </button>
+                )}
+              </div>
+              <div className="row">
+                <button type="button" className="btn" onClick={() => setModalOpen(false)}>
+                  {canWrite ? 'Cancel' : 'Close'}
                 </button>
-              )}
+                {canWrite && (
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={saving || Boolean(overlapWarning)}
+                  >
+                    {saving ? 'Saving...' : editingContract ? 'Update Contract' : 'Create Contract'}
+                  </button>
+                )}
+              </div>
             </div>
           </form>
         </Modal>

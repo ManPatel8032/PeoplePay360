@@ -5,10 +5,14 @@
 import { useState, useMemo } from 'react';
 import { api } from '../../api.js';
 import { useApi, States, Table, Badge, Modal, Field, SearchInput } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 const empty = { name: '', code: '', active: true };
 
 export default function SalaryStructures({ onSelect }) {
+  const { can } = useAuth();
+  const canWrite = can('structures', 'write') !== 'none';
+
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
@@ -28,6 +32,7 @@ export default function SalaryStructures({ onSelect }) {
   }, [data, search]);
 
   const open = (row) => {
+    if (!canWrite) return;
     setForm(row ? { name: row.name, code: row.code, active: row.active } : { ...empty });
     setEditing(row || {});
     setError('');
@@ -52,11 +57,28 @@ export default function SalaryStructures({ onSelect }) {
   };
 
   const toggle = async (row) => {
+    if (!canWrite) return;
     try {
       await api.patch(`/structures/${row.id}`, { active: !row.active });
       reload();
     } catch (e) {
       setError(e.message);
+    }
+  };
+
+  const canDelete = can('structures', 'delete') !== 'none';
+
+  const remove = async (row) => {
+    if (row.employee_count > 0) {
+      alert(`Cannot delete "${row.name}" because it is currently assigned to ${row.employee_count} running contract(s). Deactivate it instead.`);
+      return;
+    }
+    if (!confirm(`Permanently delete salary structure "${row.name}" and all its rules?`)) return;
+    try {
+      await api.del(`/structures/${row.id}`);
+      reload();
+    } catch (e) {
+      alert(e.message);
     }
   };
 
@@ -68,14 +90,21 @@ export default function SalaryStructures({ onSelect }) {
     )},
     { key: 'rule_count', label: 'Rules', align: 'right' },
     { key: 'employee_count', label: 'Employees', align: 'right' },
-    { key: 'actions', label: '', render: (r) => (
+    { key: 'actions', label: '', render: (r) => (canWrite ? (
       <div className="row">
         <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); open(r); }}>Edit</button>
         <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); toggle(r); }}>
           {r.active ? 'Deactivate' : 'Activate'}
         </button>
+        {canDelete && (
+          <button className="btn btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(r); }}>
+            Delete
+          </button>
+        )}
       </div>
-    )},
+    ) : (
+      <span className="meta">read-only</span>
+    ))},
   ];
 
   return (
@@ -85,7 +114,7 @@ export default function SalaryStructures({ onSelect }) {
           <h2>Salary Structures</h2>
           <p className="meta">Define pay calculation templates for employee contracts</p>
         </div>
-        <button className="btn btn-primary" onClick={() => open(null)}>+ New Structure</button>
+        {canWrite && <button className="btn btn-primary" onClick={() => open(null)}>+ New Structure</button>}
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
@@ -99,11 +128,11 @@ export default function SalaryStructures({ onSelect }) {
       </div>
 
       <States loading={loading} error={loadErr} empty={!visible?.length} onRetry={reload}>
-        <Table columns={columns} rows={visible} onRowClick={(r) => onSelect ? onSelect(r) : open(r)} />
+        <Table columns={columns} rows={visible} onRowClick={(r) => onSelect ? onSelect(r) : canWrite ? open(r) : undefined} />
       </States>
 
 
-      {editing && (
+      {editing && canWrite && (
         <Modal title={editing.id ? 'Edit Structure' : 'New Structure'} onClose={() => setEditing(null)}>
           {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
           <div style={{ display: 'grid', gap: 16 }}>
@@ -125,11 +154,28 @@ export default function SalaryStructures({ onSelect }) {
               </label>
             </Field>
           </div>
-          <div className="row" style={{ marginTop: 24, justifyContent: 'flex-end' }}>
-            <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
-            <button className="btn btn-primary" onClick={save} disabled={saving || !form.name || !form.code}>
-              {saving ? 'Saving…' : editing.id ? 'Save Changes' : 'Create Structure'}
-            </button>
+          <div className="row" style={{ marginTop: 24, justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              {editing.id && canDelete && (
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => {
+                    const row = editing;
+                    setEditing(null);
+                    remove(row);
+                  }}
+                >
+                  Delete Structure
+                </button>
+              )}
+            </div>
+            <div className="row">
+              <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={save} disabled={saving || !form.name || !form.code}>
+                {saving ? 'Saving…' : editing.id ? 'Save Changes' : 'Create Structure'}
+              </button>
+            </div>
           </div>
         </Modal>
       )}

@@ -64,35 +64,33 @@ export const employees = crudRouter({
     beforeCreate: (req) => validateEmployee(req.body, true),
     beforeUpdate: (req) => validateEmployee(req.body, false),
     /*
-     * Never hard-delete somebody who has been paid. `payslips.employee_id` is
-     * ON DELETE CASCADE, so this would silently erase settled payroll — set
-     * their status to inactive instead.
+     * Drop CASCADE on employee deletion:
+     * When HR/Admin deletes an employee, all their associated records
+     * (payslips, payslip lines, contracts, attendance, time-off requests,
+     * allocations) are deleted via CASCADE, and manager links are unlinked.
      */
     beforeDelete: async (req) => {
-      const used = await one(
-        `SELECT (SELECT COUNT(*) FROM payslips  WHERE employee_id = $1)::int AS payslips,
-                (SELECT COUNT(*) FROM contracts WHERE employee_id = $1)::int AS contracts,
-                (SELECT COUNT(*) FROM employees WHERE manager_id  = $1)::int AS reports`,
-        [req.params.id]
-      );
-      if (used.payslips > 0) {
-        return {
-          status: 400,
-          error: `This employee has ${used.payslips} payslip(s) and cannot be deleted — payroll history must be preserved. Set their status to Inactive instead.`,
-        };
-      }
-      if (used.reports > 0) {
-        return {
-          status: 400,
-          error: `${used.reports} employee(s) report to this person. Reassign them to another manager first.`,
-        };
-      }
-      if (used.contracts > 0) {
-        return {
-          status: 400,
-          error: `This employee has ${used.contracts} contract(s). Set their status to Inactive instead of deleting.`,
-        };
-      }
+      // 1. Clear manager links on any direct reports
+      await query('UPDATE employees SET manager_id = NULL WHERE manager_id = $1', [req.params.id]);
+
+      // 2. Cascade delete payslip lines and payslips (including validated/paid ones)
+      await query(`
+        DELETE FROM payslip_lines
+         WHERE payslip_id IN (SELECT id FROM payslips WHERE employee_id = $1)
+      `, [req.params.id]);
+      await query('DELETE FROM payslips WHERE employee_id = $1', [req.params.id]);
+
+      // 3. Cascade delete contracts
+      await query('DELETE FROM contracts WHERE employee_id = $1', [req.params.id]);
+
+      // 4. Cascade delete attendance, time off requests, allocations
+      await query('DELETE FROM attendance WHERE employee_id = $1', [req.params.id]);
+      await query('DELETE FROM time_off_requests WHERE employee_id = $1', [req.params.id]);
+      await query('DELETE FROM allocations WHERE employee_id = $1', [req.params.id]);
+
+      // 5. Unlink user account if associated
+      await query('UPDATE users SET employee_id = NULL WHERE employee_id = $1', [req.params.id]);
+
       return null;
     },
   },

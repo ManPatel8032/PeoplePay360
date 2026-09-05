@@ -35,7 +35,7 @@ export const MATRIX = {
   //                employee     hr_manager  payroll_user  payroll_manager  admin
   employees:       { employee: OWN_READ, hr_manager: FULL,  payroll_user: FULL,     payroll_manager: FULL, admin: FULL },
   contracts:       { employee: OWN_READ, hr_manager: FULL,  payroll_user: FULL,     payroll_manager: FULL, admin: FULL },
-  schedules:       { employee: NONE,     hr_manager: FULL,  payroll_user: FULL,     payroll_manager: FULL, admin: FULL },
+  schedules:       { employee: NONE,     hr_manager: FULL,  payroll_user: READ_ALL, payroll_manager: READ_ALL, admin: FULL },
   attendance:      { employee: OWN_RW,   hr_manager: FULL,  payroll_user: FULL,     payroll_manager: FULL, admin: FULL },
   timeoff:         { employee: OWN_RW,   hr_manager: FULL,  payroll_user: FULL,     payroll_manager: FULL, admin: FULL },
   timeoff_approve: { employee: NONE,     hr_manager: FULL,  payroll_user: FULL,     payroll_manager: FULL, admin: FULL },

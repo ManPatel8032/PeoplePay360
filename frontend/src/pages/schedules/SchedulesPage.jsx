@@ -28,7 +28,8 @@ function calculateTotalWeeklyHours(lines) {
 
 export default function SchedulesPage() {
   const { user, can } = useAuth();
-  const canWrite = can('schedules', 'write') !== 'none';
+  const isPayroll = user?.role === 'payroll_user' || user?.role === 'payroll_manager';
+  const canWrite = !isPayroll && can('schedules', 'write') !== 'none';
 
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
@@ -305,14 +306,16 @@ export default function SchedulesPage() {
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <label style={{ fontSize: 13, fontWeight: 600 }}>Daily Working Pattern</label>
-                <button type="button" className="btn btn-sm" onClick={addLine}>
-                  + Add Day Row
-                </button>
+                {canWrite && (
+                  <button type="button" className="btn btn-sm" onClick={addLine}>
+                    + Add Day Row
+                  </button>
+                )}
               </div>
 
               {formLines.length === 0 ? (
                 <div className="state" style={{ padding: '24px 0' }}>
-                  <p>No working days configured. Click "+ Add Day Row" to add working days.</p>
+                  <p>No working days configured.</p>
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: 8 }}>
@@ -330,7 +333,7 @@ export default function SchedulesPage() {
                           background: errorMsg ? '#fef2f2' : 'var(--surface)',
                         }}
                       >
-                        <div style={{ display: 'grid', gridTemplateColumns: '150px 110px 110px 110px 80px 36px', gap: 8, alignItems: 'center' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: canWrite ? '150px 110px 110px 110px 80px 36px' : '150px 110px 110px 110px 80px', gap: 8, alignItems: 'center' }}>
                           <div>
                             <select
                               className="select"
@@ -386,17 +389,19 @@ export default function SchedulesPage() {
                             {Math.round(rowHours * 100) / 100} h
                           </div>
 
-                          <div>
-                            <button
-                              type="button"
-                              className="btn btn-sm btn-danger"
-                              style={{ padding: '2px 8px', minHeight: 28 }}
-                              title="Remove day"
-                              onClick={() => removeLine(idx)}
-                            >
-                              ✕
-                            </button>
-                          </div>
+                          {canWrite && (
+                            <div>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-danger"
+                                style={{ padding: '2px 8px', minHeight: 28 }}
+                                title="Remove day"
+                                onClick={() => removeLine(idx)}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
                         </div>
 
                         {errorMsg && (

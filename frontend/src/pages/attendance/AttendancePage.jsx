@@ -428,24 +428,28 @@ export default function AttendancePage() {
           <p className="meta">Track working hours, overtime, half-days, and clock exceptions</p>
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-          <button
-            id="btn-head-filter-missed"
-            className={`btn ${isMissingActive ? 'btn-danger' : 'btn-outline'}`}
-            style={{ fontWeight: 600 }}
-            onClick={toggleMissedFilter}
-          >
-            {isMissingActive ? `✓ Showing Missed (${missingCheckoutCount})` : `Filter Missed Check-outs (${missingCheckoutCount})`}
-          </button>
-          {missingCheckoutCount > 0 && (
-            <button
-              id="btn-head-close-all"
-              className="btn btn-danger"
-              style={{ fontWeight: 600 }}
-              disabled={closingMissed}
-              onClick={handleCloseAllMissedCheckouts}
-            >
-              {closingMissed ? 'Closing...' : `Close All Missed Check-outs (${missingCheckoutCount})`}
-            </button>
+          {(missingCheckoutCount > 0 || isMissingActive) && (
+            <>
+              <button
+                id="btn-head-filter-missed"
+                className={`btn ${isMissingActive ? 'btn-danger' : 'btn-outline'}`}
+                style={{ fontWeight: 600 }}
+                onClick={toggleMissedFilter}
+              >
+                {isMissingActive ? `✓ Showing Missed (${missingCheckoutCount})` : `Filter Missed Check-outs (${missingCheckoutCount})`}
+              </button>
+              {missingCheckoutCount > 0 && (
+                <button
+                  id="btn-head-close-all"
+                  className="btn btn-danger"
+                  style={{ fontWeight: 600 }}
+                  disabled={closingMissed}
+                  onClick={handleCloseAllMissedCheckouts}
+                >
+                  {closingMissed ? 'Closing...' : `Close All Missed Check-outs (${missingCheckoutCount})`}
+                </button>
+              )}
+            </>
           )}
           {!isAdmin && (
             <button className="btn btn-primary" onClick={openCreateModal}>
@@ -534,47 +538,6 @@ export default function AttendancePage() {
         </Card>
       )}
 
-      {/* Exception Warning Banner */}
-      {missingCheckoutCount > 0 && (
-        <Alert level="warning">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-            <div>
-              <strong>Attendance Exceptions</strong>: {missingCheckoutCount} record(s) have missing check-outs.
-              {!missingOnly
-                ? ' You can only close missed check-outs by filter, or click the button to close all missed check-outs now.'
-                : ' Currently showing missing check-outs only. You can close individual records or close all at once.'}
-            </div>
-            <div className="row" style={{ gap: 8 }}>
-              <button
-                id="btn-toggle-filter-missing"
-                className="btn btn-sm"
-                style={{ background: '#fff', border: '1px solid var(--border)' }}
-                onClick={() => {
-                  const nextVal = !isMissingActive;
-                  setMissingOnly(nextVal);
-                  const next = new URLSearchParams(searchParams);
-                  if (nextVal) next.set('status', 'missing_checkout');
-                  else if (statusFilter === 'missing_checkout') next.delete('status');
-                  setSearchParams(next);
-                }}
-              >
-                {isMissingActive ? 'Show All Records' : `Filter Missed (${missingCheckoutCount})`}
-              </button>
-              <button
-                id="btn-close-all-missed"
-                className="btn btn-sm btn-danger"
-                disabled={closingMissed}
-                onClick={handleCloseAllMissedCheckouts}
-              >
-                {closingMissed ? 'Closing...' : `Close All Missed Check-outs (${missingCheckoutCount})`}
-              </button>
-            </div>
-          </div>
-        </Alert>
-      )}
-
-      <div style={{ height: 12 }} />
-
       <Card className="card" title="Filter Records">
         <div style={{ marginBottom: 14 }}>
           <SearchInput
@@ -645,43 +608,10 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        <div className="row" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              id="chk-missing-checkout"
-              checked={isMissingActive}
-              onChange={(e) => {
-                const checked = e.target.checked;
-                setMissingOnly(checked);
-                const next = new URLSearchParams(searchParams);
-                if (checked) {
-                  next.set('status', 'missing_checkout');
-                } else {
-                  if (statusFilter === 'missing_checkout') next.delete('status');
-                }
-                setSearchParams(next);
-              }}
-            />
-            <span>Show Missing Check-outs Only ({missingCheckoutCount})</span>
-          </label>
-
-          {missingCheckoutCount > 0 && (
-            <button
-              id="btn-filter-close-all"
-              className="btn btn-sm btn-danger"
-              style={{ marginLeft: 8 }}
-              disabled={closingMissed}
-              onClick={handleCloseAllMissedCheckouts}
-            >
-              {closingMissed ? 'Closing...' : 'Close All Missed Check-outs'}
-            </button>
-          )}
-
-          {(employeeIdFilter || statusFilter || missingOnly || searchFilter) && (
+        {(employeeIdFilter || statusFilter || isMissingActive || searchFilter) && (
+          <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
             <button
               className="btn btn-sm"
-              style={{ marginLeft: 'auto' }}
               onClick={() => {
                 setSearchParams({});
                 setMissingOnly(false);
@@ -689,8 +619,8 @@ export default function AttendancePage() {
             >
               Reset Filters
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </Card>
 
 

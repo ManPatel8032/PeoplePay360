@@ -3,6 +3,8 @@ import { Badge } from '../../components/ui.jsx';
 export default function EmployeeList({
   employees,
   onSelectEmployee,
+  canDelete = false,
+  onDeleteEmployee,
 }) {
   return (
     <div>
@@ -16,12 +18,13 @@ export default function EmployeeList({
               <th>Job Position</th>
               <th>Department</th>
               <th>Status</th>
+              {canDelete && <th style={{ textAlign: 'right' }}>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {employees.length === 0 ? (
               <tr>
-                <td colSpan="6" style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
+                <td colSpan={canDelete ? 7 : 6} style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
                   No employees match the current filters.
                 </td>
               </tr>
@@ -40,6 +43,17 @@ export default function EmployeeList({
                   <td>
                     <Badge value={emp.status} />
                   </td>
+                  {canDelete && (
+                    <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="btn btn-sm btn-danger"
+                        style={{ padding: '2px 8px', minHeight: 26, fontSize: 12 }}
+                        onClick={() => onDeleteEmployee?.(emp)}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}

@@ -214,7 +214,13 @@ contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
 }));
 
 // Delete contract
-contracts.delete('/:id', can('contracts', 'write'), ah(async (req, res) => {
+contracts.delete('/:id', can('contracts', 'delete'), ah(async (req, res) => {
+  const contract = await one('SELECT id, name FROM contracts WHERE id = $1', [req.params.id]);
+  if (!contract) return res.status(404).json({ error: 'Contract not found' });
+
+  // Clear contract_id on any payslips referencing this contract
+  await query('UPDATE payslips SET contract_id = NULL WHERE contract_id = $1', [req.params.id]);
+
   await query('DELETE FROM contracts WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));

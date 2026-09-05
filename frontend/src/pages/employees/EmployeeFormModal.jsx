@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../api.js';
 import { Modal, Field, Alert } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 /** Field label with an inline "+ New" toggle, so lookups can be created in place. */
 function LabelWithAdd({ text, adding, onToggle }) {
@@ -22,6 +23,8 @@ function LabelWithAdd({ text, adding, onToggle }) {
 }
 
 export default function EmployeeFormModal({ employee, onClose, onSaved }) {
+  const { can } = useAuth();
+  const canDeleteEmployees = can('employees', 'delete') !== 'none';
   const isEditing = Boolean(employee?.id);
 
   const [departments, setDepartments] = useState([]);
@@ -474,13 +477,38 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
           </div>
         </div>
 
-        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20 }}>
-          <button type="button" className="btn" onClick={onClose} disabled={saving}>
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving...' : isEditing ? 'Update Employee' : 'Create Employee'}
-          </button>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
+          <div>
+            {isEditing && canDeleteEmployees && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={saving}
+                onClick={async () => {
+                  if (!confirm(`Permanently delete employee "${form.name}"? This action cannot be undone.`)) return;
+                  setSaving(true);
+                  try {
+                    await api.del(`/employees/${employee.id}`);
+                    onClose();
+                    onSaved?.();
+                  } catch (err) {
+                    setError(err.message || 'Failed to delete employee');
+                    setSaving(false);
+                  }
+                }}
+              >
+                Delete Employee
+              </button>
+            )}
+          </div>
+          <div className="row">
+            <button type="button" className="btn" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving...' : isEditing ? 'Update Employee' : 'Create Employee'}
+            </button>
+          </div>
         </div>
       </form>
     </Modal>

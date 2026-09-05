@@ -5,9 +5,10 @@ import { useAuth } from '../../auth/AuthContext.jsx';
 import { Card, Badge, States } from '../../components/ui.jsx';
 import LeaveBalanceWidget from '../../components/LeaveBalanceWidget.jsx';
 
-export default function EmployeeDetailView({ employeeId, initialEmployee, onClose, onEdit, isSelfView = false }) {
+export default function EmployeeDetailView({ employeeId, initialEmployee, onClose, onEdit, onDelete, isSelfView = false }) {
   const navigate = useNavigate();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [employee, setEmployee] = useState(initialEmployee || null);
   const [summary, setSummary] = useState(null);
@@ -15,6 +16,7 @@ export default function EmployeeDetailView({ employeeId, initialEmployee, onClos
   const [error, setError] = useState(null);
 
   const canWriteEmployees = can('employees', 'write') !== 'none';
+  const canDeleteEmployees = can('employees', 'delete') !== 'none' && !isSelfView;
   const canReadContracts = can('contracts', 'read') !== 'none';
   const canReadAttendance = can('attendance', 'read') !== 'none';
   const canReadTimeOff = can('timeoff', 'read') !== 'none';
@@ -101,6 +103,11 @@ export default function EmployeeDetailView({ employeeId, initialEmployee, onClos
             {canWriteEmployees && onEdit && (
               <button className="btn btn-primary" onClick={() => onEdit(employee)}>
                 Edit Employee
+              </button>
+            )}
+            {canDeleteEmployees && onDelete && (
+              <button className="btn btn-danger" onClick={() => onDelete(employee)}>
+                Delete Employee
               </button>
             )}
             {!isSelfView && onClose && (
@@ -290,7 +297,7 @@ export default function EmployeeDetailView({ employeeId, initialEmployee, onClos
       <Card
         title="Leave Balances"
         action={
-          canReadTimeOff && (
+          canReadTimeOff && !isAdmin && (
             <button className="btn btn-sm" onClick={() => navigate(`/time-off?employee_id=${employee.id}`)}>
               Request Time Off
             </button>

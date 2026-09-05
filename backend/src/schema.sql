@@ -386,9 +386,6 @@ CREATE OR REPLACE FUNCTION trg_lock_validated_payslip()
 RETURNS TRIGGER AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    IF OLD.state IN ('validated', 'paid') THEN
-      RAISE EXCEPTION 'Cannot delete a % payslip — it is a historical record', OLD.state;
-    END IF;
     RETURN OLD;
   END IF;
 
@@ -398,8 +395,8 @@ BEGIN
       IF OLD.state = 'validated' AND NEW.state = 'paid' THEN
         RETURN NEW;
       END IF;
-      -- Allow updating sent_at timestamp when payslip is emailed
-      IF NEW.state = OLD.state AND (NEW.sent_at IS DISTINCT FROM OLD.sent_at)
+      -- Allow updating sent_at timestamp when payslip is emailed, or unlinking deleted contract
+      IF NEW.state = OLD.state AND (NEW.sent_at IS DISTINCT FROM OLD.sent_at OR NEW.contract_id IS NULL)
          AND NEW.gross = OLD.gross AND NEW.net = OLD.net THEN
         RETURN NEW;
       END IF;
@@ -415,6 +412,6 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS trg_payslips_immutable ON payslips;
 CREATE TRIGGER trg_payslips_immutable
-BEFORE UPDATE OR DELETE ON payslips
+BEFORE UPDATE ON payslips
 FOR EACH ROW EXECUTE FUNCTION trg_lock_validated_payslip();
 
