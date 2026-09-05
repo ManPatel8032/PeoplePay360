@@ -4,12 +4,12 @@ import { query, one } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import { hoursBetween } from '../lib/dates.js';
-import { blockManagerAttendance, rejected } from '../lib/guards.js';
+import { blockManagerAttendance, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
 export const attendance = Router();
 
 const ATT_SQL = `
-  SELECT a.*, e.name AS employee_name, d.name AS department_name,
+  SELECT a.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
          ROUND(EXTRACT(EPOCH FROM (a.check_out - a.check_in))::numeric / 3600, 2) AS worked_hours
     FROM attendance a
     JOIN employees e ON e.id = a.employee_id
@@ -33,11 +33,6 @@ attendance.get('/today-status', can('attendance', 'read'), ah(async (req, res) =
 
 // List attendance records
 attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
-  const isHRManager = role === 'hr_manager';
-
   const status = req.query.status;
   const missingCheckout = req.query.missing_checkout === 'true' || req.query.missing_checkout === true;
   const search = req.query.search;
@@ -45,25 +40,14 @@ attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
   const where = [];
   const params = [];
 
-  if (isSelfOnly) {
-    params.push(selfId || 0);
+  // One visibility rule for the whole app: admin/HR/payroll see everything,
+  // a manager sees their own subtree, an IC sees only themselves.
+  const scopeSql = await employeeScopeFilter(req, 'a.employee_id', params);
+  if (scopeSql) where.push(scopeSql);
+
+  if (req.query.employee_id) {
+    params.push(req.query.employee_id);
     where.push(`a.employee_id = $${params.length}`);
-  } else if (isHRManager) {
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      params.push(employeeId, selfId || 0);
-      where.push(`a.employee_id = $${params.length - 1} AND (e.manager_id = $${params.length} OR a.employee_id = $${params.length})`);
-    } else {
-      params.push(selfId || 0);
-      where.push(`(e.manager_id = $${params.length} OR a.employee_id = $${params.length})`);
-    }
-  } else {
-    // Admin: can filter by employee_id if provided
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      params.push(employeeId);
-      where.push(`a.employee_id = $${params.length}`);
-    }
   }
 
   if (status) {
@@ -91,23 +75,8 @@ attendance.get('/:id', can('attendance', 'read'), ah(async (req, res) => {
   const row = await one(`${ATT_SQL} WHERE a.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
 
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
-  const isHRManager = role === 'hr_manager';
-
-  if (isSelfOnly && row.employee_id !== selfId) {
-    return res.status(403).json({ error: 'Cannot view attendance for another employee' });
-  }
-
-  if (isHRManager) {
-    const isAllowed = await one(
-      'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
-      [row.employee_id, selfId]
-    );
-    if (!isAllowed) {
-      return res.status(403).json({ error: 'Cannot view attendance for an employee not under your management' });
-    }
+  if (!(await canSeeEmployee(req, row.employee_id))) {
+    return res.status(403).json({ error: 'This attendance record is outside your team' });
   }
 
   res.json({ data: row });

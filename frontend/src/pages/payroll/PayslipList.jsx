@@ -4,7 +4,7 @@
  */
 import { useState } from 'react';
 import { api, qs, money } from '../../api.js';
-import { useApi, States, Table, Badge } from '../../components/ui.jsx';
+import { useApi, States, Table, Badge, empNumberColumn } from '../../components/ui.jsx';
 import PayslipDetail from './PayslipDetail.jsx';
 
 export default function PayslipList() {
@@ -22,6 +22,7 @@ export default function PayslipList() {
   }
 
   const columns = [
+    empNumberColumn,
     { key: 'employee_name', label: 'Employee' },
     { key: 'payrun_name', label: 'Payrun' },
     { key: 'period', label: 'Period', render: (r) => `${r.period_start} → ${r.period_end}` },

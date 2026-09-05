@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api, money } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -260,6 +260,7 @@ export default function ContractsPage() {
         );
       },
     },
+    empNumberColumn,
     {
       key: 'employee_name',
       label: 'Employee',

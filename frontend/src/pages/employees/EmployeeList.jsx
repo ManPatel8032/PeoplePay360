@@ -10,6 +10,7 @@ export default function EmployeeList({
         <table>
           <thead>
             <tr>
+              <th>Emp. No.</th>
               <th>Employee</th>
               <th>Work Email</th>
               <th>Job Position</th>
@@ -20,7 +21,7 @@ export default function EmployeeList({
           <tbody>
             {employees.length === 0 ? (
               <tr>
-                <td colSpan="5" style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
+                <td colSpan="6" style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
                   No employees match the current filters.
                 </td>
               </tr>
@@ -31,6 +32,7 @@ export default function EmployeeList({
                   className="clickable"
                   onClick={() => onSelectEmployee?.(emp)}
                 >
+                  <td><span className="mono">{emp.employee_number}</span></td>
                   <td style={{ fontWeight: 600 }}>{emp.name}</td>
                   <td>{emp.work_email || '—'}</td>
                   <td>{emp.job_position_name || '—'}</td>

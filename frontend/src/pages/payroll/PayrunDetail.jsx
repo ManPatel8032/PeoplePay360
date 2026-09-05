@@ -5,7 +5,7 @@
  */
 import { useState } from 'react';
 import { api, money, moneyExact } from '../../api.js';
-import { useApi, States, Card, Table, Badge, Alert } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Alert, empNumberColumn } from '../../components/ui.jsx';
 import PayslipDetail from './PayslipDetail.jsx';
 
 const ACTIONS = {
@@ -72,6 +72,7 @@ export default function PayrunDetail({ payrunId, onBack }) {
   const otherWarnings = allWarnings.filter((w) => w.level !== 'error');
 
   const slipColumns = [
+    empNumberColumn,
     { key: 'employee_name', label: 'Employee' },
     { key: 'department_name', label: 'Department', render: (r) => r.department_name || '—' },
     { key: 'worked_days', label: 'Worked Days', align: 'right' },

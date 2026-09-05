@@ -9,12 +9,59 @@
  *  2. The pay of payroll staff (the people who run payroll) may only be set by
  *     an Admin, so nobody can influence their own or a colleague's salary.
  */
-import { one } from '../db.js';
+import { one, query } from '../db.js';
 
 /** Roles whose holders are considered payroll staff for rule 2. */
 export const PAYROLL_ROLES = ['payroll_user', 'payroll_manager'];
 
 export const isAdmin = (req) => req.user?.role === 'admin';
+
+/**
+ * Which employee records may this caller see?
+ *
+ *   { scope: 'all' }                    admin, hr_manager, payroll_*
+ *   { scope: 'team', ids: [...] }       anyone with direct reports — their own
+ *                                       record plus their whole subtree, so a
+ *                                       department head still sees the people
+ *                                       under their team leads
+ *   { scope: 'self', ids: [ownId] }     an individual contributor
+ *   { scope: 'none', ids: [] }          a login with no employee record
+ *
+ * Managers are identified by the org chart, not by role: an `employee` who
+ * happens to manage a team gets team scope.
+ */
+export async function visibleEmployees(req) {
+  const role = req.user?.role;
+  const selfId = req.user?.employee_id ?? null;
+
+  if (role === 'admin' || role === 'hr_manager' || PAYROLL_ROLES.includes(role)) {
+    return { scope: 'all', ids: null };
+  }
+  if (!selfId) return { scope: 'none', ids: [] };
+
+  const rows = await query('SELECT id FROM employee_subtree($1)', [selfId]);
+  const ids = rows.map((r) => r.id);
+  return { scope: ids.length > 1 ? 'team' : 'self', ids };
+}
+
+/** True when the caller may see this particular employee's records. */
+export async function canSeeEmployee(req, employeeId) {
+  const v = await visibleEmployees(req);
+  if (v.scope === 'all') return true;
+  return v.ids.includes(Number(employeeId));
+}
+
+/**
+ * SQL fragment restricting a query to the visible employees.
+ * Returns null when no restriction is needed.
+ */
+export async function employeeScopeFilter(req, column, params) {
+  const v = await visibleEmployees(req);
+  if (v.scope === 'all') return null;
+  if (!v.ids.length) return `${column} IS NULL`; // matches nothing
+  params.push(v.ids);
+  return `${column} = ANY($${params.length}::int[])`;
+}
 
 /** True when this employee has at least one direct report. */
 export async function isManager(employeeId) {

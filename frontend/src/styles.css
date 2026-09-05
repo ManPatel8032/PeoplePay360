@@ -327,3 +327,11 @@ tbody tr.clickable:hover { background: var(--surface-2); cursor: pointer; }
   background: var(--surface-2);
 }
 
+
+/* staff codes, ids and other fixed-width identifiers */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}

@@ -1,9 +1,11 @@
 /**
  * User Administration (Admin only).
- * Create logins, assign roles, link them to employee records, deactivate
- * accounts, reset passwords and clear lockouts.
+ *
+ * Employee-centric: every employee is listed whether or not they hold a login,
+ * so an admin can see at a glance who still needs an account. Logins with no
+ * employee record (the IT admin) appear at the end.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import { useApi, States, Card, Table, Badge, Field, Modal, Alert } from '../../components/ui.jsx';
@@ -17,148 +19,213 @@ const ROLES = [
 ];
 const roleLabel = (r) => ROLES.find((x) => x.value === r)?.label || r;
 
-const isLocked = (u) => u.locked_until && new Date(u.locked_until) > new Date();
+const isLocked = (r) => r.locked_until && new Date(r.locked_until) > new Date();
+const hasLogin = (r) => Boolean(r.user_id);
 
-function fmtDate(v) {
-  if (!v) return 'Never';
-  const d = new Date(v);
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+const fmtDate = (v) =>
+  v ? new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Never';
 
 export default function UsersPage() {
   const { user: me } = useAuth();
-  const users = useApi(() => api.get('/users'), []);
-  const [creating, setCreating] = useState(false);
+  const rows = useApi(() => api.get('/users'), []);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(null);   // employee row, or {} for a standalone login
   const [editing, setEditing] = useState(null);
   const [resetting, setResetting] = useState(null);
   const [banner, setBanner] = useState(null);
 
   const say = (msg) => { setBanner(msg); setTimeout(() => setBanner(null), 4000); };
+  const all = rows.data || [];
 
-  async function toggleActive(u) {
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return all.filter((r) => {
+      if (filter === 'with' && !hasLogin(r)) return false;
+      if (filter === 'without' && hasLogin(r)) return false;
+      if (!q) return true;
+      return [r.employee_name, r.name, r.email, r.work_email, r.employee_number, r.department_name]
+        .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+    });
+  }, [all, filter, search]);
+
+  async function toggleActive(r) {
     try {
-      await api.patch(`/users/${u.id}`, { is_active: !u.is_active });
-      say(`${u.name} ${u.is_active ? 'deactivated' : 'reactivated'}.`);
-      users.reload();
+      await api.patch(`/users/${r.user_id}`, { is_active: !r.is_active });
+      say(`${r.name} ${r.is_active ? 'deactivated' : 'reactivated'}.`);
+      rows.reload();
     } catch (err) { say(err.message); }
   }
 
-  async function unlock(u) {
+  async function unlock(r) {
     try {
-      await api.post(`/users/${u.id}/unlock`);
-      say(`${u.name} unlocked.`);
-      users.reload();
+      await api.post(`/users/${r.user_id}/unlock`);
+      say(`${r.name} unlocked.`);
+      rows.reload();
     } catch (err) { say(err.message); }
   }
 
   const columns = [
     {
-      key: 'name', label: 'User',
-      render: (u) => (
+      key: 'employee_number', label: 'Emp. No.',
+      render: (r) => r.employee_number
+        ? <span className="mono">{r.employee_number}</span>
+        : <span className="muted">—</span>,
+    },
+    {
+      key: 'person', label: 'Person',
+      render: (r) => (
         <div>
           <div style={{ fontWeight: 600 }}>
-            {u.name}{u.id === me?.id && <span className="meta"> (you)</span>}
+            {r.employee_name || r.name}
+            {r.user_id === me?.id && <span className="meta"> (you)</span>}
           </div>
-          <div className="meta">{u.email}</div>
+          <div className="meta">{r.email || r.work_email || 'No email on record'}</div>
         </div>
       ),
     },
-    { key: 'role', label: 'Role', render: (u) => <Badge value={roleLabel(u.role)} tone="accent" /> },
     {
-      key: 'employee_name', label: 'Employee record',
-      render: (u) => u.employee_name
-        ? <div>{u.employee_name}<div className="meta">{u.department_name || '—'}</div></div>
-        : <span className="muted">Not linked</span>,
+      key: 'department_name', label: 'Department',
+      render: (r) => r.department_name
+        ? <div>{r.department_name}<div className="meta">{r.job_position_name || '—'}</div></div>
+        : <span className="muted">No employee record</span>,
     },
     {
+      key: 'manager_name', label: 'Reports to',
+      render: (r) => (
+        <div>
+          <div>{r.manager_name || (r.employee_id ? 'Top level' : '—')}</div>
+          {r.direct_reports > 0 && <div className="meta">manages {r.direct_reports}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'role', label: 'Login',
+      render: (r) => hasLogin(r)
+        ? <Badge value={roleLabel(r.role)} tone="accent" />
+        : <span className="badge">no account</span>,
+    },
+    {
+      // Admin accounts carry no status field — they cannot be deactivated here.
       key: 'status', label: 'Status',
-      render: (u) => {
-        if (!u.is_active) return <Badge value="inactive" tone="danger" />;
-        if (isLocked(u)) return <Badge value="locked" tone="warning" />;
-        if (u.must_change_password) return <Badge value="must reset" tone="warning" />;
+      render: (r) => {
+        if (!hasLogin(r)) return <span className="muted">—</span>;
+        if (r.role === 'admin') return <span className="muted">—</span>;
+        if (!r.is_active) return <Badge value="inactive" tone="danger" />;
+        if (isLocked(r)) return <Badge value="locked" tone="warning" />;
+        if (r.must_change_password) return <Badge value="must reset" tone="warning" />;
         return <Badge value="active" tone="success" />;
       },
     },
-    { key: 'last_login_at', label: 'Last login', render: (u) => <span className="meta">{fmtDate(u.last_login_at)}</span> },
+    { key: 'last_login_at', label: 'Last login', render: (r) => <span className="meta">{hasLogin(r) ? fmtDate(r.last_login_at) : '—'}</span> },
     {
       key: 'actions', label: '', align: 'right',
-      render: (u) => (
-        <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
-          <button className="btn btn-sm" onClick={() => setEditing(u)}>Edit</button>
-          <button className="btn btn-sm" onClick={() => setResetting(u)}>Reset password</button>
-          {isLocked(u) && <button className="btn btn-sm" onClick={() => unlock(u)}>Unlock</button>}
-          <button
-            className={`btn btn-sm ${u.is_active ? 'btn-danger' : ''}`}
-            onClick={() => toggleActive(u)}
-            disabled={u.id === me?.id}
-            title={u.id === me?.id ? 'You cannot deactivate your own account' : ''}
-          >
-            {u.is_active ? 'Deactivate' : 'Reactivate'}
-          </button>
-        </div>
-      ),
+      render: (r) => {
+        if (!hasLogin(r)) {
+          return (
+            <button className="btn btn-sm btn-primary" onClick={() => setCreating(r)}>
+              Create login
+            </button>
+          );
+        }
+        const isAdminRow = r.role === 'admin';
+        return (
+          <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+            <button className="btn btn-sm" onClick={() => setEditing(r)}>Edit</button>
+            <button className="btn btn-sm" onClick={() => setResetting(r)}>Reset password</button>
+            {isLocked(r) && <button className="btn btn-sm" onClick={() => unlock(r)}>Unlock</button>}
+            {/* No activate/deactivate control on admin accounts. */}
+            {!isAdminRow && (
+              <button
+                className={`btn btn-sm ${r.is_active ? 'btn-danger' : ''}`}
+                onClick={() => toggleActive(r)}
+              >
+                {r.is_active ? 'Deactivate' : 'Reactivate'}
+              </button>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
-  const list = users.data || [];
+  const withLogin = all.filter(hasLogin).length;
+  const withoutLogin = all.filter((r) => r.employee_id && !hasLogin(r)).length;
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>User Administration</h1>
-          <p className="meta">Logins, role assignment and account access. Admin only.</p>
+          <p className="meta">Every employee, and whether they hold a login. Admin only.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setCreating(true)}>+ New User</button>
+        <button className="btn btn-primary" onClick={() => setCreating({})}>+ New Login</button>
       </div>
 
       {banner && <div style={{ marginBottom: 16 }}><Alert level="info">{banner}</Alert></div>}
 
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
-        <Card><div className="kpi"><div className="kpi-label">Accounts</div><div className="kpi-value">{list.length}</div></div></Card>
-        <Card><div className="kpi"><div className="kpi-label">Active</div><div className="kpi-value">{list.filter((u) => u.is_active).length}</div></div></Card>
-        <Card><div className="kpi"><div className="kpi-label">Admins</div><div className="kpi-value">{list.filter((u) => u.role === 'admin' && u.is_active).length}</div></div></Card>
-        <Card><div className="kpi"><div className="kpi-label">Locked out</div><div className="kpi-value">{list.filter(isLocked).length}</div></div></Card>
+        <Card><div className="kpi"><div className="kpi-label">Employees</div><div className="kpi-value">{all.filter((r) => r.employee_id).length}</div></div></Card>
+        <Card><div className="kpi"><div className="kpi-label">With a login</div><div className="kpi-value">{withLogin}</div></div></Card>
+        <Card><div className="kpi"><div className="kpi-label">No account yet</div><div className="kpi-value">{withoutLogin}</div></div></Card>
+        <Card><div className="kpi"><div className="kpi-label">Locked out</div><div className="kpi-value">{all.filter(isLocked).length}</div></div></Card>
       </div>
 
-      <States loading={users.loading} error={users.error} onRetry={users.reload} empty={!users.loading && list.length === 0}>
-        <Table columns={columns} rows={list} empty="No user accounts yet" />
+      <Card className="card" style={{ marginBottom: 16 }}>
+        <div className="row">
+          <input
+            className="input" style={{ maxWidth: 300 }} placeholder="Search name, number, email…"
+            value={search} onChange={(e) => setSearch(e.target.value)}
+          />
+          <select className="select" style={{ width: 'auto' }} value={filter} onChange={(e) => setFilter(e.target.value)}>
+            <option value="all">Everyone</option>
+            <option value="with">Has a login</option>
+            <option value="without">No account yet</option>
+          </select>
+          <span className="meta">{visible.length} shown</span>
+        </div>
+      </Card>
+
+      <States loading={rows.loading} error={rows.error} onRetry={rows.reload} empty={!rows.loading && visible.length === 0}>
+        <Table columns={columns} rows={visible.map((r) => ({ ...r, id: r.user_id ?? `e${r.employee_id}` }))} empty="Nobody matches that filter" />
       </States>
 
       {creating && (
         <UserFormModal
-          onClose={() => setCreating(false)}
-          onSaved={(name) => { setCreating(false); say(`${name} created.`); users.reload(); }}
+          employee={creating.employee_id ? creating : null}
+          onClose={() => setCreating(null)}
+          onSaved={(n) => { setCreating(null); say(`${n} can now sign in.`); rows.reload(); }}
         />
       )}
       {editing && (
         <UserFormModal
           user={editing}
-          isSelf={editing.id === me?.id}
+          isSelf={editing.user_id === me?.id}
           onClose={() => setEditing(null)}
-          onSaved={(name) => { setEditing(null); say(`${name} updated.`); users.reload(); }}
+          onSaved={(n) => { setEditing(null); say(`${n} updated.`); rows.reload(); }}
         />
       )}
       {resetting && (
         <ResetPasswordModal
           user={resetting}
           onClose={() => setResetting(null)}
-          onSaved={() => { const n = resetting.name; setResetting(null); say(`Password reset for ${n}. They must change it at next login.`); users.reload(); }}
+          onSaved={() => { const n = resetting.name; setResetting(null); say(`Password reset for ${n}.`); rows.reload(); }}
         />
       )}
     </>
   );
 }
 
-function UserFormModal({ user, isSelf, onClose, onSaved }) {
-  const editing = Boolean(user?.id);
+function UserFormModal({ user, employee, isSelf, onClose, onSaved }) {
+  const editing = Boolean(user?.user_id);
   const linkable = useApi(() => api.get('/users/linkable/employees'), []);
 
   const [form, setForm] = useState({
-    name: user?.name || '',
-    email: user?.email || '',
+    name: user?.name || employee?.employee_name || '',
+    email: user?.email || employee?.work_email || '',
     role: user?.role || 'employee',
-    employee_id: user?.employee_id ? String(user.employee_id) : '',
+    employee_id: user?.employee_id ? String(user.employee_id)
+      : employee?.employee_id ? String(employee.employee_id) : '',
     password: '',
   });
   const [saving, setSaving] = useState(false);
@@ -171,7 +238,6 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
     setError(null);
   };
 
-  /** When creating, pick an employee to prefill name + work email. */
   function pickEmployee(e) {
     const id = e.target.value;
     const emp = (linkable.data || []).find((x) => String(x.id) === id);
@@ -196,12 +262,9 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
     setError(null);
     try {
       if (editing) {
-        const payload = {
-          name: form.name.trim(),
-          employee_id: form.employee_id ? Number(form.employee_id) : null,
-        };
+        const payload = { name: form.name.trim(), employee_id: form.employee_id ? Number(form.employee_id) : null };
         if (!isSelf) payload.role = form.role;
-        await api.patch(`/users/${user.id}`, payload);
+        await api.patch(`/users/${user.user_id}`, payload);
       } else {
         await api.post('/users', {
           name: form.name.trim(),
@@ -220,14 +283,20 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
     }
   }
 
-  // When editing, the currently linked employee is not in the "linkable" list.
   const options = [...(linkable.data || [])];
+  if (employee?.employee_id && !options.some((o) => o.id === employee.employee_id)) {
+    options.unshift({ id: employee.employee_id, name: employee.employee_name, department_name: employee.department_name });
+  }
   if (editing && user.employee_id && !options.some((o) => o.id === user.employee_id)) {
     options.unshift({ id: user.employee_id, name: user.employee_name, department_name: user.department_name });
   }
 
+  const title = editing ? `Edit ${user.name}`
+    : employee ? `Create login — ${employee.employee_name}`
+    : 'New Login';
+
   return (
-    <Modal title={editing ? `Edit ${user.name}` : 'New User'} onClose={onClose} width={560}>
+    <Modal title={title} onClose={onClose} width={560}>
       {error && <div style={{ marginBottom: 16 }}><Alert level="error">{error}</Alert></div>}
 
       <form onSubmit={submit}>
@@ -239,7 +308,7 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
                 <option key={e.id} value={e.id}>{e.name}{e.department_name ? ` · ${e.department_name}` : ''}</option>
               ))}
             </select>
-            <span className="meta">Links this login to an HR record. Only employees without an account are listed.</span>
+            <span className="meta">Only employees without an account are listed.</span>
           </Field>
 
           <Field label="Role" error={fieldErrors.role}>
@@ -254,10 +323,7 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
           </Field>
 
           <Field label="Email *" error={fieldErrors.email}>
-            <input
-              className="input" type="email" value={form.email} onChange={set('email')}
-              placeholder="e.g. meera@peoplepay360.com" disabled={editing}
-            />
+            <input className="input" type="email" value={form.email} onChange={set('email')} disabled={editing} />
             {editing && <span className="meta">Email cannot be changed after creation.</span>}
           </Field>
 
@@ -269,7 +335,7 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
                   value={form.password} onChange={set('password')}
                   placeholder="At least 10 characters"
                 />
-                <span className="meta">Share this with the user — they must change it at first login.</span>
+                <span className="meta">Share this with them — they must change it at first login.</span>
               </Field>
             </div>
           )}
@@ -278,7 +344,7 @@ function UserFormModal({ user, isSelf, onClose, onSaved }) {
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20 }}>
           <button type="button" className="btn" onClick={onClose} disabled={saving}>Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? 'Saving…' : editing ? 'Update User' : 'Create User'}
+            {saving ? 'Saving…' : editing ? 'Update' : 'Create login'}
           </button>
         </div>
       </form>
@@ -297,7 +363,7 @@ function ResetPasswordModal({ user, onClose, onSaved }) {
     setSaving(true);
     setError(null);
     try {
-      await api.post(`/users/${user.id}/reset-password`, { newPassword: password });
+      await api.post(`/users/${user.user_id}/reset-password`, { newPassword: password });
       onSaved?.();
     } catch (err) {
       setError(err.message);
@@ -318,7 +384,7 @@ function ResetPasswordModal({ user, onClose, onSaved }) {
           />
         </Field>
         <p className="meta" style={{ marginTop: 8 }}>
-          {user.name} must change this at their next login, and all their existing sessions will be signed out.
+          They must change this at next login, and all their sessions will be signed out.
         </p>
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20 }}>
           <button type="button" className="btn" onClick={onClose} disabled={saving}>Cancel</button>
