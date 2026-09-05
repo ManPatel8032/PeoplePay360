@@ -36,11 +36,12 @@ async function main() {
   console.log('seeding...');
 
   // ---------- departments & positions ----------
-  const deptNames = ['Engineering', 'Sales', 'Human Resources', 'Finance', 'Operations'];
+  const deptNames = ['Executive', 'Engineering', 'Sales', 'Human Resources', 'Finance', 'Operations'];
   const depts = {};
   for (const n of deptNames) depts[n] = (await one('INSERT INTO departments (name) VALUES ($1) RETURNING id', [n])).id;
 
   const posDefs = [
+    ['Managing Director', 'Executive'],
     ['Senior Engineer', 'Engineering'], ['Engineer', 'Engineering'], ['QA Engineer', 'Engineering'],
     ['Account Executive', 'Sales'], ['Sales Manager', 'Sales'],
     ['HR Business Partner', 'Human Resources'], ['Recruiter', 'Human Resources'],
@@ -111,7 +112,11 @@ async function main() {
     )).id;
 
   // ---------- employees ----------
+  // Index 0 is the Managing Director: the single root of the org chart and the
+  // only employee without a manager. Everybody else — department heads
+  // included — reports to somebody.
   const people = [
+    ['Rohini Deshpande','Executive',        'Managing Director',   'full_time', 260000, std,  'HDFC0001-1000001'],
     ['Aarav Sharma',    'Engineering',      'Senior Engineer',     'full_time', 145000, std,  'HDFC0001-8827341'],
     ['Priya Nair',      'Engineering',      'Engineer',            'full_time', 95000,  std,  'ICIC0002-3391822'],
     ['Rohan Mehta',     'Engineering',      'Engineer',            'full_time', 88000,  std,  'SBIN0003-7712094'],
@@ -141,26 +146,76 @@ async function main() {
                               employee_type, status, bank_account, join_date)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
       [name, email, `+91 9${rndInt(100000000, 999999999)}`, depts[dept], pos[position], sched,
-       etype, i === 8 ? 'on_leave' : 'active', bank, join]
+       etype, name === 'Devansh Gupta' ? 'on_leave' : 'active', bank, join]
     );
     empIds.push(row.id);
   }
 
-  // managers: first engineer manages engineering, etc.
-  await query('UPDATE employees SET manager_id = $1 WHERE department_id = $2 AND id <> $1', [empIds[0], depts.Engineering]);
-  await query('UPDATE employees SET manager_id = $1 WHERE department_id = $2 AND id <> $1', [empIds[4], depts.Sales]);
-  await query('UPDATE employees SET manager_id = $1 WHERE department_id = $2 AND id <> $1', [empIds[7], depts['Human Resources']]);
+  /* Name -> id, so the reporting lines below don't silently break the next time
+     somebody inserts a row into `people`. */
+  const byName = Object.fromEntries(people.map((p, i) => [p[0], empIds[i]]));
+
+  /*
+   * Reporting lines. Every employee gets a manager; the Managing Director is
+   * the single root (manager_id stays NULL). Department heads report to the MD,
+   * so managers have managers too.
+   */
+  const MD = byName['Rohini Deshpande'];
+  const DEPARTMENT_HEADS = {
+    Engineering:       byName['Aarav Sharma'],
+    Sales:             byName['Vikram Rao'],
+    'Human Resources': byName['Meera Joshi'],
+    // Arjun (payroll_manager) heads Finance so the reporting line runs the same
+    // way as the permission hierarchy — Ishita is payroll_user and reports up.
+    Finance:           byName['Arjun Patel'],
+    Operations:        byName['Nisha Verma'],
+  };
+
+  for (const [deptName, headId] of Object.entries(DEPARTMENT_HEADS)) {
+    // the head reports to the MD ...
+    await query('UPDATE employees SET manager_id = $1 WHERE id = $2', [MD, headId]);
+    // ... and everyone else in that department reports to the head
+    await query(
+      'UPDATE employees SET manager_id = $1 WHERE department_id = $2 AND id <> $1',
+      [headId, depts[deptName]]
+    );
+  }
+
+  const orphans = await query(
+    'SELECT name FROM employees WHERE manager_id IS NULL AND id <> $1', [MD]
+  );
+  if (orphans.length) {
+    throw new Error(`Seed produced employees with no manager: ${orphans.map((o) => o.name).join(', ')}`);
+  }
 
   // ---------- users / roles ----------
   const SEED_PASSWORD = process.env.SEED_PASSWORD || 'Password123!';
   const passwordHash = bcrypt.hashSync(SEED_PASSWORD, 10);
 
+  /*
+   * Logins are deliberately NOT one-per-employee.
+   *
+   *  - Ops Admin has no employee record at all (an IT account: no contract,
+   *    no payslip) — proof the two tables are not interchangeable.
+   *  - Everyone the access rules actually concern gets a login: the MD and
+   *    every department head, so "a manager's attendance is Admin-only" and
+   *    the org chart can both be demonstrated from the accounts they affect.
+   *  - The rank-and-file are left without logins on purpose, because plenty of
+   *    real employees are paid without ever signing in.
+   *
+   * Note Aarav and Vikram manage teams but hold the plain `employee` role:
+   * being a manager is a position in the org chart, not a permission level.
+   */
   const userDefs = [
-    ['Ops Admin',       'admin@peoplepay360.com',    'admin',           null],
-    ['Meera Joshi',     'meera.hr@peoplepay360.com', 'hr_manager',      empIds[7]],
-    ['Arjun Patel',     'arjun.pay@peoplepay360.com','payroll_manager', empIds[10]],
-    ['Ishita Banerjee', 'ishita.pay@peoplepay360.com','payroll_user',   empIds[9]],
-    ['Priya Nair',      'priya.emp@peoplepay360.com','employee',        empIds[1]],
+    ['Ops Admin',        'admin@peoplepay360.com',     'admin',           null],
+    ['Rohini Deshpande', 'rohini.md@peoplepay360.com', 'admin',           byName['Rohini Deshpande']],
+    ['Meera Joshi',      'meera.hr@peoplepay360.com',  'hr_manager',      byName['Meera Joshi']],
+    ['Arjun Patel',      'arjun.pay@peoplepay360.com', 'payroll_manager', byName['Arjun Patel']],
+    ['Ishita Banerjee',  'ishita.pay@peoplepay360.com','payroll_user',    byName['Ishita Banerjee']],
+    ['Aarav Sharma',     'aarav.emp@peoplepay360.com', 'employee',        byName['Aarav Sharma']],
+    ['Vikram Rao',       'vikram.emp@peoplepay360.com','employee',        byName['Vikram Rao']],
+    ['Nisha Verma',      'nisha.emp@peoplepay360.com', 'employee',        byName['Nisha Verma']],
+    ['Priya Nair',       'priya.emp@peoplepay360.com', 'employee',        byName['Priya Nair']],
   ];
   for (const [name, email, role, empId] of userDefs) {
     await query(
@@ -223,7 +278,7 @@ async function main() {
   await query(
     `INSERT INTO allocations (employee_id,type_id,amount,state,valid_from,valid_to,note)
      VALUES ($1,$2,5,'draft',$3,$4,'Comp-off for release weekend')`,
-    [empIds[0], types.COMP, yearStart, yearEnd]
+    [byName['Aarav Sharma'], types.COMP, yearStart, yearEnd]
   );
 
   // ---------- attendance: last 6 months of working days ----------

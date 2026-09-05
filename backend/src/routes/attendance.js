@@ -4,6 +4,7 @@ import { query, one } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import { hoursBetween } from '../lib/dates.js';
+import { blockManagerAttendance, rejected } from '../lib/guards.js';
 
 export const attendance = Router();
 
@@ -304,6 +305,10 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
   const existing = await one('SELECT * FROM attendance WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
+  // A manager's own attendance is reviewed by an Admin only. Checked before the
+  // scoping rules below, since it overrides them for every non-admin caller.
+  if (rejected(res, await blockManagerAttendance(req, existing.employee_id))) return;
+
   const role = req.user?.role;
   const selfId = req.user?.employee_id;
   const isHRManager = role === 'hr_manager';
@@ -364,18 +369,23 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
 
 // Delete attendance record
 attendance.delete('/:id', can('employees', 'write'), ah(async (req, res) => {
+  const existing = await one('SELECT employee_id FROM attendance WHERE id = $1', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  // Deleting a record is the strongest form of "rejecting" it, so the
+  // Admin-only rule for managers applies here too.
+  if (rejected(res, await blockManagerAttendance(req, existing.employee_id))) return;
+
   if (req.user?.role === 'hr_manager') {
-    const existing = await one('SELECT employee_id FROM attendance WHERE id = $1', [req.params.id]);
-    if (existing) {
-      const isAllowed = await one(
-        'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
-        [existing.employee_id, req.user?.employee_id]
-      );
-      if (!isAllowed) {
-        return res.status(403).json({ error: 'Cannot delete attendance for an employee not under your management' });
-      }
+    const isAllowed = await one(
+      'SELECT id FROM employees WHERE id = $1 AND (manager_id = $2 OR id = $2)',
+      [existing.employee_id, req.user?.employee_id]
+    );
+    if (!isAllowed) {
+      return res.status(403).json({ error: 'Cannot delete attendance for an employee not under your management' });
     }
   }
+
   await query('DELETE FROM attendance WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));

@@ -236,3 +236,78 @@ CREATE TABLE IF NOT EXISTS payslip_lines (
   amount     NUMERIC(14,2) NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_line_slip ON payslip_lines(payslip_id, sequence);
+
+-- ============ ORG HIERARCHY INTEGRITY ============
+-- Every employee reports to exactly one manager. The single exception is the
+-- root of the org (the MD), whose manager_id is NULL. Managers themselves have
+-- managers, so the chain always terminates at that one root.
+
+-- Nobody may manage themselves. Added defensively so re-running is safe.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'employees_no_self_manager'
+  ) THEN
+    ALTER TABLE employees
+      ADD CONSTRAINT employees_no_self_manager
+      CHECK (manager_id IS NULL OR manager_id <> id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_emp_manager ON employees(manager_id);
+
+/*
+ * Reject reporting cycles (A -> B -> A). Without this, one bad edit in the
+ * employee form makes every org-chart query and payroll roll-up loop forever.
+ */
+CREATE OR REPLACE FUNCTION employees_check_manager_cycle() RETURNS trigger AS $$
+DECLARE
+  cursor_id INTEGER;
+  hops      INTEGER := 0;
+BEGIN
+  IF NEW.manager_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  cursor_id := NEW.manager_id;
+  WHILE cursor_id IS NOT NULL LOOP
+    IF cursor_id = NEW.id THEN
+      RAISE EXCEPTION 'Manager assignment creates a reporting cycle for employee %', NEW.id
+        USING ERRCODE = 'check_violation';
+    END IF;
+
+    hops := hops + 1;
+    IF hops > 100 THEN
+      RAISE EXCEPTION 'Reporting chain exceeds 100 levels — probable cycle'
+        USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT manager_id INTO cursor_id FROM employees WHERE id = cursor_id;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_employees_manager_cycle ON employees;
+CREATE TRIGGER trg_employees_manager_cycle
+  BEFORE INSERT OR UPDATE OF manager_id ON employees
+  FOR EACH ROW EXECUTE FUNCTION employees_check_manager_cycle();
+
+/*
+ * Convenience view: who reports to whom, plus how deep in the org each person
+ * sits. Used by the org chart and by the "is this person a manager" checks.
+ */
+CREATE OR REPLACE VIEW employee_hierarchy AS
+WITH RECURSIVE chain AS (
+  SELECT e.id, e.name, e.manager_id, 1 AS level, e.name::text AS path
+    FROM employees e
+   WHERE e.manager_id IS NULL
+  UNION ALL
+  SELECT e.id, e.name, e.manager_id, c.level + 1, c.path || ' > ' || e.name
+    FROM employees e
+    JOIN chain c ON e.manager_id = c.id
+)
+SELECT c.id, c.name, c.manager_id, c.level, c.path,
+       (SELECT COUNT(*) FROM employees r WHERE r.manager_id = c.id)::int AS direct_reports
+  FROM chain c;

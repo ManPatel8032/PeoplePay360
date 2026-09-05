@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { query, one } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
 import { ah } from '../lib/crud.js';
+import { blockPayrollStaffPay, rejected } from '../lib/guards.js';
 
 export const contracts = Router();
 
@@ -100,6 +101,9 @@ contracts.post('/', can('contracts', 'write'), ah(async (req, res) => {
   } = req.body;
 
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
+
+  // Only an Admin may set the pay terms of payroll staff.
+  if (rejected(res, await blockPayrollStaffPay(req, employee_id))) return;
   if (!name || !name.trim()) return res.status(400).json({ error: 'Contract name is required' });
   if (!start_date) return res.status(400).json({ error: 'Start date is required' });
 
@@ -150,6 +154,13 @@ contracts.post('/', can('contracts', 'write'), ah(async (req, res) => {
 contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
   const existing = await one('SELECT * FROM contracts WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  // Only an Admin may change the pay terms of payroll staff. Non-pay edits
+  // (dates, department, schedule) stay open to HR.
+  if (rejected(res, await blockPayrollStaffPay(req, existing.employee_id, req.body))) return;
+  if (req.body.employee_id !== undefined && req.body.employee_id !== existing.employee_id) {
+    if (rejected(res, await blockPayrollStaffPay(req, req.body.employee_id, req.body))) return;
+  }
 
   const employee_id = req.body.employee_id !== undefined ? req.body.employee_id : existing.employee_id;
   const name = req.body.name !== undefined ? req.body.name : existing.name;
