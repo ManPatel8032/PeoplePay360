@@ -13,7 +13,7 @@
     "dev:client": "npm --workspace client run dev",
     "seed": "npm --workspace server run seed",
     "reset": "npm --workspace server run reset",
-    "db:up": "docker compose up -d db",
+    "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "db:nuke": "docker compose down -v",
     "setup": "npm run db:up && npm install && npm run reset",
