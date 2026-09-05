@@ -79,6 +79,49 @@ export function deriveAttendanceStatus(h, defaultStatus = 'present', fullDayHour
   return 'absent';
 }
 
+/**
+ * Attendance is a record of what already happened, so nothing may be logged
+ * ahead of the clock. A couple of minutes of slack absorbs clock skew between
+ * the browser and the server.
+ */
+const CLOCK_SKEW_MS = 2 * 60 * 1000;
+
+function futureError(label, at) {
+  if (!at) return null;
+  const t = new Date(at).getTime();
+  if (Number.isNaN(t)) return `${label} is not a valid date and time`;
+  if (t > Date.now() + CLOCK_SKEW_MS) {
+    return `${label} is in the future. Attendance can only be recorded for time that has already passed.`;
+  }
+  return null;
+}
+
+/**
+ * One record per employee per day. A day either has a shift or it does not, and
+ * payroll counts attended days by distinct date — a second row for the same day
+ * is always a mistake, never a second shift.
+ */
+async function sameDayRecord(employeeId, checkIn, excludeId = null) {
+  return one(
+    `SELECT a.id, a.check_in, a.check_out, e.name AS employee_name
+       FROM attendance a JOIN employees e ON e.id = a.employee_id
+      WHERE a.employee_id = $1
+        AND a.check_in::date = ($2::timestamptz)::date
+        AND ($3::int IS NULL OR a.id <> $3::int)
+      ORDER BY a.check_in LIMIT 1`,
+    [employeeId, checkIn, excludeId]
+  );
+}
+
+const duplicateError = (row) => ({
+  error: `${row.employee_name} already has an attendance record on ${String(row.check_in).slice(0, 10)}`
+    + ` (checked in at ${String(row.check_in).slice(11, 16)} UTC`
+    + `${row.check_out ? ', out at ' + String(row.check_out).slice(11, 16) + ' UTC' : ', still open'}).`
+    + ' Correct that record instead of adding a second one for the same day.',
+  fields: { check_in: ['A record already exists for this day'] },
+  existing: { id: row.id, check_in: row.check_in, check_out: row.check_out },
+});
+
 const ATT_SQL = `
   SELECT a.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
          ROUND(EXTRACT(EPOCH FROM (COALESCE(a.check_out, NOW()) - a.check_in))::numeric / 3600, 2) AS worked_hours
@@ -236,6 +279,12 @@ attendance.post('/check-in', can('attendance', 'write'), ah(async (req, res) => 
   const checkIn = req.body.check_in || new Date().toISOString();
   const notes = req.body.notes || null;
 
+  const future = futureError('Check-in time', checkIn);
+  if (future) return res.status(400).json({ error: future });
+
+  const dupe = await sameDayRecord(employeeId, checkIn);
+  if (dupe) return res.status(409).json(duplicateError(dupe));
+
   const inserted = await one(
     `INSERT INTO attendance (employee_id, check_in, status, manual_edit, notes)
      VALUES ($1, $2, 'present', FALSE, $3) RETURNING id`,
@@ -269,6 +318,9 @@ attendance.post('/check-out', can('attendance', 'write'), ah(async (req, res) =>
   }
 
   const at = req.body.check_out || new Date().toISOString();
+  const futureOut = futureError('Check-out time', at);
+  if (futureOut) return res.status(400).json({ error: futureOut });
+
   const h = hoursBetween(open.check_in, at);
   const fullDay = await getEmployeeFullDayHours(employeeId, open.check_in);
   const status = deriveAttendanceStatus(h, open.status || 'present', fullDay);
@@ -306,6 +358,9 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
       checkOutTime = new Date().toISOString();
     }
   }
+
+  const futureOut = futureError('Check-out time', checkOutTime);
+  if (futureOut) return res.status(400).json({ error: futureOut });
 
   const h = hoursBetween(row.check_in, checkOutTime);
   const fullDay = await getEmployeeFullDayHours(row.employee_id, row.check_in);
@@ -378,15 +433,20 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
   if (!check_in) return res.status(400).json({ error: 'Check-in time is required' });
 
+  for (const problem of [futureError('Check-in time', check_in), futureError('Check-out time', check_out)]) {
+    if (problem) return res.status(400).json({ error: problem });
+  }
+
+  const dupe = await sameDayRecord(employee_id, check_in);
+  if (dupe) return res.status(409).json(duplicateError(dupe));
+
   if (check_out) {
     if (new Date(check_out) < new Date(check_in)) {
       return res.status(400).json({ error: 'Check-out time must be after check-in time' });
     }
     const h = hoursBetween(check_in, check_out);
-    if (!req.body.status) {
-      const fullDay = await getEmployeeFullDayHours(employee_id, check_in);
-      status = deriveAttendanceStatus(h, 'present', fullDay);
-    }
+    const fullDay = await getEmployeeFullDayHours(employee_id, check_in);
+    status = deriveAttendanceStatus(h, req.body.status || 'present', fullDay);
   }
 
   const role = req.user?.role;
@@ -431,6 +491,15 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
   if (check_out && check_in && new Date(check_out) < new Date(check_in)) {
     return res.status(400).json({ error: 'Check-out time must be after check-in time' });
   }
+
+  for (const problem of [futureError('Check-in time', check_in), futureError('Check-out time', check_out)]) {
+    if (problem) return res.status(400).json({ error: problem });
+  }
+
+  // Moving a record onto a day that already has one would create the duplicate
+  // the create path refuses, so the same rule applies here.
+  const dupe = await sameDayRecord(employee_id, check_in, Number(req.params.id));
+  if (dupe) return res.status(409).json(duplicateError(dupe));
 
   if (check_out && check_in && req.body.status === undefined) {
     const h = hoursBetween(check_in, check_out);

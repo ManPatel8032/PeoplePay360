@@ -27,13 +27,38 @@ function formatTimeOnly(isoStr) {
   });
 }
 
-function toLocalDatetimeString(dateInput) {
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/**
+ * The form keeps the day and the clock time in separate <input type="date"> and
+ * <input type="time"> fields rather than one datetime-local. A datetime-local
+ * bound to an empty string cannot be filled in reliably — every incomplete
+ * keystroke reads back as '', so the check-out field could never be completed —
+ * and a plain time field is what "record the check-out time" actually needs.
+ */
+function toLocalDate(dateInput) {
   if (!dateInput) return '';
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return '';
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
+
+function toLocalTime(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** Combine the two fields back into an instant, in the viewer's own timezone. */
+function combineLocal(date, time) {
+  if (!date || !time) return null;
+  const d = new Date(`${date}T${time}`);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Attendance can only be logged for a day that has already started. */
+const TODAY_LOCAL = toLocalDate(new Date());
 
 export default function AttendancePage() {
   const { user, can } = useAuth();
@@ -120,8 +145,10 @@ export default function AttendancePage() {
   // Form fields
   const [form, setForm] = useState({
     employee_id: '',
-    check_in: '',
-    check_out: '',
+    check_in_date: '',
+    check_in_time: '',
+    check_out_date: '',
+    check_out_time: '',
     status: 'present',
     notes: '',
   });
@@ -247,15 +274,17 @@ export default function AttendancePage() {
 
   const openCreateModal = () => {
     setEditingRow(null);
-    const nowIso = toLocalDatetimeString(new Date());
+    const now = new Date();
     const defaultEmpId = isSelfOnly && user?.employee_id
       ? String(user.employee_id)
       : (employeeIdFilter || (user?.employee_id ? String(user.employee_id) : ''));
 
     setForm({
       employee_id: defaultEmpId,
-      check_in: nowIso,
-      check_out: '',
+      check_in_date: toLocalDate(now),
+      check_in_time: toLocalTime(now),
+      check_out_date: toLocalDate(now),
+      check_out_time: '',
       status: 'present',
       notes: '',
     });
@@ -265,12 +294,13 @@ export default function AttendancePage() {
 
   const openEditModal = (row) => {
     setEditingRow(row);
-    const inIso = row.check_in ? toLocalDatetimeString(row.check_in) : '';
-    const outIso = row.check_out ? toLocalDatetimeString(row.check_out) : '';
     setForm({
       employee_id: String(row.employee_id),
-      check_in: inIso,
-      check_out: outIso,
+      check_in_date: toLocalDate(row.check_in),
+      check_in_time: toLocalTime(row.check_in),
+      // An open shift still needs a day for its check-out, so offer the same one.
+      check_out_date: toLocalDate(row.check_out || row.check_in),
+      check_out_time: toLocalTime(row.check_out),
       status: row.status || 'present',
       notes: row.notes || '',
     });
@@ -286,20 +316,40 @@ export default function AttendancePage() {
       setFormError('Please select an employee.');
       return;
     }
-    if (!form.check_in) {
-      setFormError('Check-in time is required.');
+    const checkIn = combineLocal(form.check_in_date, form.check_in_time);
+    if (!checkIn) {
+      setFormError('Check-in date and time are required.');
       return;
     }
-    if (form.check_out && new Date(form.check_out) < new Date(form.check_in)) {
+    const checkOut = form.check_out_time
+      ? combineLocal(form.check_out_date || form.check_in_date, form.check_out_time)
+      : null;
+    if (form.check_out_time && !checkOut) {
+      setFormError('Check-out date and time are not a valid combination.');
+      return;
+    }
+    if (checkOut && checkOut < checkIn) {
       setFormError('Check-out time must be after check-in time.');
+      return;
+    }
+
+    // Attendance records time that has already passed, so neither end may be ahead
+    // of the clock. The date pickers stop at today; this catches the time of day.
+    const now = Date.now();
+    if (checkIn.getTime() > now) {
+      setFormError('Check-in time is in the future.');
+      return;
+    }
+    if (checkOut && checkOut.getTime() > now) {
+      setFormError('Check-out time is in the future.');
       return;
     }
 
     setSaving(true);
     const payload = {
       employee_id: Number(form.employee_id),
-      check_in: new Date(form.check_in).toISOString(),
-      check_out: form.check_out ? new Date(form.check_out).toISOString() : null,
+      check_in: checkIn.toISOString(),
+      check_out: checkOut ? checkOut.toISOString() : null,
       status: form.status,
       notes: form.notes || null,
     };
@@ -508,7 +558,7 @@ export default function AttendancePage() {
                 {isCheckedIn
                   ? `Active shift for ${todayStatus?.employee_name || user?.name} started at ${formatTimeOnly(todayStatus?.check_in)}. Click "Check Out" when your shift completes to calculate worked hours.`
                   : todayStatus?.check_out
-                    ? `Shift ended at ${formatTimeOnly(todayStatus.check_out)} with ${Number(todayStatus.worked_hours || 0).toFixed(2)} hrs worked today. Click "Check In" if starting another shift.`
+                    ? `Shift ended at ${formatTimeOnly(todayStatus.check_out)} with ${Number(todayStatus.worked_hours || 0).toFixed(2)} hrs worked today. Today is recorded — ask HR to correct the entry if the times are wrong.`
                     : 'You have not checked in today. Click "Check In" to start tracking your working shift today.'}
               </p>
             </div>
@@ -669,13 +719,32 @@ export default function AttendancePage() {
               </select>
             </Field>
 
+            <Field label="Date *">
+              <input
+                className="input"
+                type="date"
+                max={TODAY_LOCAL}
+                value={form.check_in_date}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    check_in_date: e.target.value,
+                    // Keep the check-out on the same day unless it was moved on purpose.
+                    check_out_date:
+                      form.check_out_date === form.check_in_date ? e.target.value : form.check_out_date,
+                  })
+                }
+                required
+              />
+            </Field>
+
             <div className="grid grid-2">
               <Field label="Check-In Time *">
                 <input
                   className="input"
-                  type="datetime-local"
-                  value={form.check_in}
-                  onChange={(e) => setForm({ ...form, check_in: e.target.value })}
+                  type="time"
+                  value={form.check_in_time}
+                  onChange={(e) => setForm({ ...form, check_in_time: e.target.value })}
                   required
                 />
               </Field>
@@ -683,12 +752,34 @@ export default function AttendancePage() {
               <Field label="Check-Out Time (Optional)">
                 <input
                   className="input"
-                  type="datetime-local"
-                  value={form.check_out}
-                  onChange={(e) => setForm({ ...form, check_out: e.target.value })}
+                  type="time"
+                  value={form.check_out_time}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      check_out_time: e.target.value,
+                      check_out_date: form.check_out_date || form.check_in_date,
+                    })
+                  }
                 />
               </Field>
             </div>
+
+            {form.check_out_time && (
+              <Field label="Check-Out Date">
+                <input
+                  className="input"
+                  type="date"
+                  min={form.check_in_date || undefined}
+                  max={TODAY_LOCAL}
+                  value={form.check_out_date}
+                  onChange={(e) => setForm({ ...form, check_out_date: e.target.value })}
+                />
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Only change this for a shift that ran past midnight.
+                </div>
+              </Field>
+            )}
 
             <Field label="Status Classification">
               <select
