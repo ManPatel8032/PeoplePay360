@@ -39,7 +39,8 @@ export default function AttendancePage() {
   const employeeIdFilter = searchParams.get('employee_id') || '';
   const effectiveEmpId = isSelfOnly && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const statusFilter = searchParams.get('status') || '';
-  const [missingOnly, setMissingOnly] = useState(false);
+  const isMissingFromUrl = statusFilter === 'missing_checkout' || searchParams.get('missing_checkout') === 'true';
+  const [missingOnly, setMissingOnly] = useState(isMissingFromUrl);
 
   // Modals & form state
   const [modalOpen, setModalOpen] = useState(false);
@@ -59,7 +60,18 @@ export default function AttendancePage() {
     const list = employees.data || [];
     if (isAdmin) return list;
     if (isHRManager) {
-      return list.filter((emp) => emp.manager_id === user?.employee_id || emp.id === user?.employee_id);
+      const subordinateIds = new Set([user?.employee_id]);
+      let added = true;
+      while (added) {
+        added = false;
+        for (const emp of list) {
+          if (emp.manager_id && subordinateIds.has(emp.manager_id) && !subordinateIds.has(emp.id)) {
+            subordinateIds.add(emp.id);
+            added = true;
+          }
+        }
+      }
+      return list.filter((emp) => subordinateIds.has(emp.id));
     }
     if (isSelfOnly) {
       return list.filter((emp) => emp.id === user?.employee_id);
@@ -74,16 +86,33 @@ export default function AttendancePage() {
   );
 
   // List of attendance records
-  const { data: attendanceList, loading, error, reload } = useApi(
+  const isMissingActive = missingOnly || statusFilter === 'missing_checkout';
+
+  const { data: attendanceRes, loading, error, reload } = useApi(
     () => {
       const q = new URLSearchParams();
       if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
-      if (statusFilter) q.set('status', statusFilter);
-      if (missingOnly) q.set('missing_checkout', 'true');
+      if (statusFilter && statusFilter !== 'missing_checkout') q.set('status', statusFilter);
+      if (isMissingActive) q.set('missing_checkout', 'true');
       const qs = q.toString();
       return api.get(`/attendance${qs ? '?' + qs : ''}`);
     },
-    [effectiveEmpId, statusFilter, missingOnly]
+    [effectiveEmpId, statusFilter, isMissingActive]
+  );
+  const attendanceList = Array.isArray(attendanceRes) ? attendanceRes : (attendanceRes?.data || []);
+
+  // Total missing count across scope from dedicated endpoint
+  const { data: missingCountData, reload: reloadMissingCount } = useApi(
+    () => {
+      const q = new URLSearchParams();
+      if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
+      const qs = q.toString();
+      return api.get(`/attendance/missing-count${qs ? '?' + qs : ''}`);
+    },
+    [effectiveEmpId]
+  );
+  const missingCheckoutCount = missingCountData?.count ?? (
+    (attendanceList || []).filter((r) => !r.check_out).length
   );
 
   // Form fields
@@ -95,25 +124,105 @@ export default function AttendancePage() {
     notes: '',
   });
 
-  const isCheckedIn = todayStatus && !todayStatus.check_out;
+  // Validation / Notice popup modal
+  const [infoModal, setInfoModal] = useState({ open: false, title: '', message: '', type: 'info' });
 
-  const handleQuickCheckInOut = async () => {
+  const isCheckedIn = Boolean(todayStatus && !todayStatus.check_out);
+
+  const handleCheckInClick = async () => {
+    if (isCheckedIn) {
+      setInfoModal({
+        open: true,
+        title: 'Already Checked In',
+        message: `You are already checked in since ${formatTimeOnly(todayStatus?.check_in)}. Click "Check Out" when your shift is completed.`,
+        type: 'warning',
+      });
+      return;
+    }
+
     setQuickActionLoading(true);
     try {
-      if (isCheckedIn) {
-        // Quick check out
-        await api.post('/attendance/check-out', {});
-      } else {
-        // Quick check in
-        await api.post('/attendance/check-in', {});
-      }
+      await api.post('/attendance/check-in', {});
       reloadStatus();
       reload();
     } catch (err) {
-      alert(err.message || 'Check-in/out action failed');
+      setInfoModal({
+        open: true,
+        title: 'Check-In Notice',
+        message: err.message || 'Check-in failed',
+        type: 'error',
+      });
     } finally {
       setQuickActionLoading(false);
     }
+  };
+
+  const handleCheckOutClick = async () => {
+    if (!isCheckedIn) {
+      setInfoModal({
+        open: true,
+        title: 'You have not checked in',
+        message: 'You cannot check out because you have not checked in yet. Please click "Check In" first to begin your shift.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    setQuickActionLoading(true);
+    try {
+      await api.post('/attendance/check-out', {});
+      reloadStatus();
+      reload();
+    } catch (err) {
+      setInfoModal({
+        open: true,
+        title: 'Check-Out Notice',
+        message: err.message || 'Check-out failed',
+        type: 'error',
+      });
+    } finally {
+      setQuickActionLoading(false);
+    }
+  };
+
+  const [closingMissed, setClosingMissed] = useState(false);
+
+  const handleCloseAllMissedCheckouts = async () => {
+    setClosingMissed(true);
+    try {
+      const res = await api.post('/attendance/close-missed-checkouts', {});
+      setInfoModal({
+        open: true,
+        title: 'Missed Check-outs Closed',
+        message: res.message || 'All missed check-out records have been closed with standard 8-hour shifts.',
+        type: 'info',
+      });
+      reload();
+      reloadStatus();
+      reloadMissingCount();
+    } catch (err) {
+      setInfoModal({
+        open: true,
+        title: 'Error Closing Missed Check-outs',
+        message: err.message || 'Failed to close missed check-outs',
+        type: 'error',
+      });
+    } finally {
+      setClosingMissed(false);
+    }
+  };
+
+  const toggleMissedFilter = () => {
+    const nextVal = !isMissingActive;
+    setMissingOnly(nextVal);
+    const next = new URLSearchParams(searchParams);
+    if (nextVal) {
+      next.set('status', 'missing_checkout');
+    } else {
+      if (statusFilter === 'missing_checkout') next.delete('status');
+      next.delete('missing_checkout');
+    }
+    setSearchParams(next);
   };
 
   const handleQuickCheckOutRow = async (e, row) => {
@@ -122,8 +231,14 @@ export default function AttendancePage() {
       await api.post(`/attendance/${row.id}/check-out`, {});
       reload();
       reloadStatus();
+      reloadMissingCount();
     } catch (err) {
-      alert(err.message || 'Check-out failed');
+      setInfoModal({
+        open: true,
+        title: 'Check-Out Notice',
+        message: err.message || 'Check-out failed',
+        type: 'error',
+      });
     }
   };
 
@@ -202,11 +317,6 @@ export default function AttendancePage() {
     }
   };
 
-  // Missing checkout count
-  const missingCheckoutCount = useMemo(() => {
-    return (attendanceList || []).filter((r) => !r.check_out).length;
-  }, [attendanceList]);
-
   const columns = useMemo(() => [
     {
       key: 'employee_name',
@@ -246,18 +356,23 @@ export default function AttendancePage() {
       label: 'Check Out',
       render: (r) => {
         if (!r.check_out) {
+          const isOwnRecord = Number(r.employee_id) === Number(user?.employee_id);
+          const canClose = (missingOnly || statusFilter === 'missing_checkout') && (isOwnRecord || isHRManager || isAdmin);
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span className="badge badge-danger" style={{ fontSize: 11 }}>
                 Missing Check-out
               </span>
-              <button
-                className="btn btn-sm"
-                style={{ padding: '1px 6px', fontSize: 11 }}
-                onClick={(e) => handleQuickCheckOutRow(e, r)}
-              >
-                Close Now
-              </button>
+              {canClose && (
+                <button
+                  className="btn btn-sm btn-danger"
+                  style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600 }}
+                  onClick={(e) => handleQuickCheckOutRow(e, r)}
+                  title="Close missed check-out"
+                >
+                  Close Now
+                </button>
+              )}
             </div>
           );
         }
@@ -292,7 +407,7 @@ export default function AttendancePage() {
         )
       ),
     },
-  ], [setSearchParams, isSelfOnly]);
+  ], [setSearchParams, isSelfOnly, user?.employee_id, missingOnly, statusFilter, isHRManager, isAdmin]);
 
   return (
     <>
@@ -301,13 +416,32 @@ export default function AttendancePage() {
           <h1>Time & Attendance</h1>
           <p className="meta">Track working hours, overtime, half-days, and clock exceptions</p>
         </div>
-        {!isAdmin && (
-          <div className="row">
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <button
+            id="btn-head-filter-missed"
+            className={`btn ${isMissingActive ? 'btn-danger' : 'btn-outline'}`}
+            style={{ fontWeight: 600 }}
+            onClick={toggleMissedFilter}
+          >
+            {isMissingActive ? `✓ Showing Missed (${missingCheckoutCount})` : `Filter Missed Check-outs (${missingCheckoutCount})`}
+          </button>
+          {missingCheckoutCount > 0 && (
+            <button
+              id="btn-head-close-all"
+              className="btn btn-danger"
+              style={{ fontWeight: 600 }}
+              disabled={closingMissed}
+              onClick={handleCloseAllMissedCheckouts}
+            >
+              {closingMissed ? 'Closing...' : `Close All Missed Check-outs (${missingCheckoutCount})`}
+            </button>
+          )}
+          {!isAdmin && (
             <button className="btn btn-primary" onClick={openCreateModal}>
               + Log Attendance Entry
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Quick Check-in / Check-out Banner (Hidden for Admin) */}
@@ -315,38 +449,76 @@ export default function AttendancePage() {
         <Card
           className="card"
           style={{
-            background: isCheckedIn ? '#ecfdf5' : 'var(--surface)',
-            borderColor: isCheckedIn ? '#a7f3d0' : 'var(--border)',
+            background: isCheckedIn ? '#ecfdf5' : todayStatus?.check_out ? '#f0fdf4' : 'var(--surface)',
+            borderColor: isCheckedIn ? '#a7f3d0' : todayStatus?.check_out ? '#bbf7d0' : 'var(--border)',
             marginBottom: 16,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 16, fontWeight: 700, color: isCheckedIn ? 'var(--success)' : 'var(--text)' }}>
-                  {isCheckedIn ? '● Currently Checked In' : '○ Not Checked In'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 700,
+                    color: isCheckedIn ? 'var(--success)' : todayStatus?.check_out ? 'var(--success)' : 'var(--text)',
+                  }}
+                >
+                  {isCheckedIn
+                    ? '● Currently Checked In'
+                    : todayStatus?.check_out
+                      ? '✓ Shift Completed Today'
+                      : '○ Not Checked In Today'}
                 </span>
-                {isCheckedIn && (
+                {todayStatus?.check_in && (
                   <span className="badge badge-success">
-                    Since {formatTimeOnly(todayStatus?.check_in)}
+                    In: {formatTimeOnly(todayStatus.check_in)}
                   </span>
                 )}
+                {todayStatus?.check_out && (
+                  <span className="badge badge-info">
+                    Out: {formatTimeOnly(todayStatus.check_out)}
+                  </span>
+                )}
+                {todayStatus?.worked_hours && (
+                  <span className="badge badge-primary" style={{ fontWeight: 600 }}>
+                    Worked Today: {Number(todayStatus.worked_hours).toFixed(2)} hrs
+                  </span>
+                )}
+                {todayStatus?.status && (
+                  <Badge value={todayStatus.status} />
+                )}
               </div>
-              <p className="meta" style={{ marginTop: 4 }}>
+              <p className="meta" style={{ marginTop: 6, marginBottom: 0 }}>
                 {isCheckedIn
-                  ? `Logged in employee (${todayStatus?.employee_name || user?.name}). Click check out when your shift completes to derive worked hours.`
-                  : 'Click check in to start tracking your working shift today.'}
+                  ? `Active shift for ${todayStatus?.employee_name || user?.name} started at ${formatTimeOnly(todayStatus?.check_in)}. Click "Check Out" when your shift completes to calculate worked hours.`
+                  : todayStatus?.check_out
+                    ? `Shift ended at ${formatTimeOnly(todayStatus.check_out)} with ${Number(todayStatus.worked_hours || 0).toFixed(2)} hrs worked today. Click "Check In" if starting another shift.`
+                    : 'You have not checked in today. Click "Check In" to start tracking your working shift today.'}
               </p>
             </div>
 
-            <button
-              className={`btn ${isCheckedIn ? 'btn-danger' : 'btn-primary'}`}
-              style={{ minWidth: 160, padding: '10px 18px', fontWeight: 600 }}
-              disabled={quickActionLoading}
-              onClick={handleQuickCheckInOut}
-            >
-              {quickActionLoading ? 'Processing...' : isCheckedIn ? 'Check Out Now' : 'Check In Now'}
-            </button>
+            <div className="row" style={{ gap: 10 }}>
+              <button
+                id="btn-check-in"
+                className="btn btn-primary"
+                style={{ minWidth: 120, padding: '10px 18px', fontWeight: 600 }}
+                disabled={quickActionLoading}
+                onClick={handleCheckInClick}
+              >
+                {quickActionLoading ? 'Processing...' : 'Check In'}
+              </button>
+
+              <button
+                id="btn-check-out"
+                className="btn btn-danger"
+                style={{ minWidth: 120, padding: '10px 18px', fontWeight: 600 }}
+                disabled={quickActionLoading}
+                onClick={handleCheckOutClick}
+              >
+                {quickActionLoading ? 'Processing...' : 'Check Out'}
+              </button>
+            </div>
           </div>
         </Card>
       )}
@@ -354,8 +526,39 @@ export default function AttendancePage() {
       {/* Exception Warning Banner */}
       {missingCheckoutCount > 0 && (
         <Alert level="warning">
-          <strong>Attendance Exceptions</strong>: {missingCheckoutCount} record(s) have missing check-outs.
-          Click any row to provide corrections or click "Close Now" to record check-out.
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <strong>Attendance Exceptions</strong>: {missingCheckoutCount} record(s) have missing check-outs.
+              {!missingOnly
+                ? ' You can only close missed check-outs by filter, or click the button to close all missed check-outs now.'
+                : ' Currently showing missing check-outs only. You can close individual records or close all at once.'}
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                id="btn-toggle-filter-missing"
+                className="btn btn-sm"
+                style={{ background: '#fff', border: '1px solid var(--border)' }}
+                onClick={() => {
+                  const nextVal = !isMissingActive;
+                  setMissingOnly(nextVal);
+                  const next = new URLSearchParams(searchParams);
+                  if (nextVal) next.set('status', 'missing_checkout');
+                  else if (statusFilter === 'missing_checkout') next.delete('status');
+                  setSearchParams(next);
+                }}
+              >
+                {isMissingActive ? 'Show All Records' : `Filter Missed (${missingCheckoutCount})`}
+              </button>
+              <button
+                id="btn-close-all-missed"
+                className="btn btn-sm btn-danger"
+                disabled={closingMissed}
+                onClick={handleCloseAllMissedCheckouts}
+              >
+                {closingMissed ? 'Closing...' : `Close All Missed Check-outs (${missingCheckoutCount})`}
+              </button>
+            </div>
+          </div>
         </Alert>
       )}
 
@@ -390,15 +593,23 @@ export default function AttendancePage() {
             <label>Status</label>
             <select
               className="select"
-              value={statusFilter}
+              value={isMissingActive ? 'missing_checkout' : statusFilter}
               onChange={(e) => {
+                const val = e.target.value;
                 const next = new URLSearchParams(searchParams);
-                if (e.target.value) next.set('status', e.target.value);
-                else next.delete('status');
+                if (val === 'missing_checkout') {
+                  setMissingOnly(true);
+                  next.set('status', 'missing_checkout');
+                } else {
+                  setMissingOnly(false);
+                  if (val) next.set('status', val);
+                  else next.delete('status');
+                }
                 setSearchParams(next);
               }}
             >
               <option value="">All Statuses</option>
+              <option value="missing_checkout">Missing Check-out ({missingCheckoutCount})</option>
               <option value="present">Present (Standard)</option>
               <option value="overtime">Overtime (&gt; 9 hrs)</option>
               <option value="half_day">Half Day (&lt; 4 hrs)</option>
@@ -408,15 +619,38 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="row" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
             <input
               type="checkbox"
-              checked={missingOnly}
-              onChange={(e) => setMissingOnly(e.target.checked)}
+              id="chk-missing-checkout"
+              checked={isMissingActive}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setMissingOnly(checked);
+                const next = new URLSearchParams(searchParams);
+                if (checked) {
+                  next.set('status', 'missing_checkout');
+                } else {
+                  if (statusFilter === 'missing_checkout') next.delete('status');
+                }
+                setSearchParams(next);
+              }}
             />
             <span>Show Missing Check-outs Only ({missingCheckoutCount})</span>
           </label>
+
+          {missingCheckoutCount > 0 && (
+            <button
+              id="btn-filter-close-all"
+              className="btn btn-sm btn-danger"
+              style={{ marginLeft: 8 }}
+              disabled={closingMissed}
+              onClick={handleCloseAllMissedCheckouts}
+            >
+              {closingMissed ? 'Closing...' : 'Close All Missed Check-outs'}
+            </button>
+          )}
 
           {(employeeIdFilter || statusFilter || missingOnly) && (
             <button
@@ -534,6 +768,30 @@ export default function AttendancePage() {
               )}
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Notice / Validation Popup Modal */}
+      {infoModal.open && (
+        <Modal
+          title={infoModal.title}
+          onClose={() => setInfoModal((prev) => ({ ...prev, open: false }))}
+          width={440}
+        >
+          <div style={{ display: 'grid', gap: 16 }}>
+            <Alert level={infoModal.type === 'error' ? 'error' : infoModal.type === 'warning' ? 'warning' : 'info'}>
+              {infoModal.message}
+            </Alert>
+            <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+              <button
+                id="btn-close-notice"
+                className="btn btn-primary"
+                onClick={() => setInfoModal((prev) => ({ ...prev, open: false }))}
+              >
+                OK
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
     </>
