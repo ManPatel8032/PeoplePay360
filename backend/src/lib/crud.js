@@ -25,7 +25,7 @@ export const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)
  *   `scope.filter(req, params)` returns a SQL fragment (or null) narrowing the
  *   list; `scope.canSee(req, row)` decides a single record.
  */
-export function crudRouter({ table, module, columns, listSql, itemSql, filters = {}, orderBy = 'id DESC', searchCol, idColumn, scope }) {
+export function crudRouter({ table, module, columns, listSql, itemSql, filters = {}, orderBy = 'id DESC', searchCol, idColumn, scope, hooks = {} }) {
   const r = Router();
   const idCol = idColumn || `${table}.id`;
 
@@ -66,6 +66,7 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
   }));
 
   r.post('/', can(module, 'write'), ah(async (req, res) => {
+    if (await denied(res, hooks.beforeCreate, req)) return;
     const cols = columns.filter((c) => req.body[c] !== undefined);
     if (!cols.length) return res.status(400).json({ error: 'No fields provided' });
     const row = await one(
@@ -77,6 +78,7 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
   }));
 
   r.patch('/:id', can(module, 'write'), ah(async (req, res) => {
+    if (await denied(res, hooks.beforeUpdate, req)) return;
     const cols = columns.filter((c) => req.body[c] !== undefined);
     if (!cols.length) return res.status(400).json({ error: 'No fields provided' });
     const row = await one(
@@ -88,12 +90,31 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
     res.json({ data: row });
   }));
 
-  r.delete('/:id', can(module, 'write'), ah(async (req, res) => {
+  // `delete` is its own permission — the PS gives Payroll User create/read/update
+  // on payruns and payslips but explicitly not delete.
+  r.delete('/:id', can(module, 'delete'), ah(async (req, res) => {
+    if (await denied(res, hooks.beforeDelete, req)) return;
     await query(`DELETE FROM ${table} WHERE id = $1`, [req.params.id]);
     res.status(204).end();
   }));
 
   return r;
+}
+
+/**
+ * Run a write hook. A hook returns `{ status, error }` to block the request, or
+ * anything falsy to allow it.
+ *
+ * Hooks must be passed INTO the factory rather than registered on the returned
+ * router: Express matches in registration order, so a handler appended
+ * afterwards for a path the factory already owns never executes.
+ */
+async function denied(res, hook, req) {
+  if (!hook) return false;
+  const problem = await hook(req);
+  if (!problem) return false;
+  res.status(problem.status || 400).json({ error: problem.error });
+  return true;
 }
 
 const norm = (v) => (v === '' ? null : v);

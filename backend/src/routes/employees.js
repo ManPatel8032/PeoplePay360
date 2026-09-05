@@ -5,6 +5,36 @@ import { crudRouter, ah } from '../lib/crud.js';
 import { contractForPeriod } from '../lib/payroll.js';
 import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMPLOYEE_TYPES = ['full_time', 'part_time', 'contract', 'intern'];
+const EMPLOYEE_STATUSES = ['active', 'on_leave', 'inactive'];
+
+/**
+ * Field validation. Returns a problem object, or null when the body is fine.
+ * `requireName` is false on PATCH, where a partial body is legitimate.
+ */
+function validateEmployee(body, requireName) {
+  if (requireName && !String(body.name ?? '').trim()) {
+    return { status: 400, error: 'Employee name is required' };
+  }
+  if (body.name !== undefined && !String(body.name ?? '').trim()) {
+    return { status: 400, error: 'Employee name cannot be empty' };
+  }
+  if (body.work_email && !EMAIL_RE.test(String(body.work_email).trim())) {
+    return { status: 400, error: `"${body.work_email}" is not a valid email address` };
+  }
+  if (body.employee_type && !EMPLOYEE_TYPES.includes(body.employee_type)) {
+    return { status: 400, error: `Employee type must be one of: ${EMPLOYEE_TYPES.join(', ')}` };
+  }
+  if (body.status && !EMPLOYEE_STATUSES.includes(body.status)) {
+    return { status: 400, error: `Status must be one of: ${EMPLOYEE_STATUSES.join(', ')}` };
+  }
+  if (body.join_date && Number.isNaN(Date.parse(body.join_date))) {
+    return { status: 400, error: 'Join date is not a valid date' };
+  }
+  return null;
+}
+
 const EMP_SQL = `
   SELECT e.*, d.name AS department_name, j.name AS job_position_name,
          m.name AS manager_name, w.name AS schedule_name
@@ -25,6 +55,42 @@ export const employees = crudRouter({
   filters: { department_id: 'e.department_id', status: 'e.status', employee_type: 'e.employee_type' },
   searchCol: 'e.name',
   orderBy: 'e.name ASC',
+  hooks: {
+    beforeCreate: (req) => validateEmployee(req.body, true),
+    beforeUpdate: (req) => validateEmployee(req.body, false),
+    /*
+     * Never hard-delete somebody who has been paid. `payslips.employee_id` is
+     * ON DELETE CASCADE, so this would silently erase settled payroll — set
+     * their status to inactive instead.
+     */
+    beforeDelete: async (req) => {
+      const used = await one(
+        `SELECT (SELECT COUNT(*) FROM payslips  WHERE employee_id = $1)::int AS payslips,
+                (SELECT COUNT(*) FROM contracts WHERE employee_id = $1)::int AS contracts,
+                (SELECT COUNT(*) FROM employees WHERE manager_id  = $1)::int AS reports`,
+        [req.params.id]
+      );
+      if (used.payslips > 0) {
+        return {
+          status: 400,
+          error: `This employee has ${used.payslips} payslip(s) and cannot be deleted — payroll history must be preserved. Set their status to Inactive instead.`,
+        };
+      }
+      if (used.reports > 0) {
+        return {
+          status: 400,
+          error: `${used.reports} employee(s) report to this person. Reassign them to another manager first.`,
+        };
+      }
+      if (used.contracts > 0) {
+        return {
+          status: 400,
+          error: `This employee has ${used.contracts} contract(s). Set their status to Inactive instead of deleting.`,
+        };
+      }
+      return null;
+    },
+  },
   // A manager sees their own record plus everyone below them in the chart;
   // an individual contributor sees only themselves.
   scope: {

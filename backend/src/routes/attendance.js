@@ -1,12 +1,33 @@
 /** Attendance (B3). Owner: Track B / Section 2. */
 import { Router } from 'express';
 import { query, one } from '../db.js';
-import { can, scopeToSelf } from '../auth.js';
+import { can, scope } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import { hoursBetween } from '../lib/dates.js';
 import { blockManagerAttendance, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
 export const attendance = Router();
+
+/**
+ * Whose attendance may this caller write?
+ *
+ *   write scope 'own' → forced to their own record, whatever the body asks for
+ *   write scope 'all' → any employee; defaults to themselves when unspecified
+ *
+ * Per the PS: an Employee may "create attendance entries" (their own), while
+ * HR Manager and above have full CRUD across everyone.
+ */
+function writeTarget(req, requestedId) {
+  const allowed = scope(req, 'attendance', 'write');
+  const selfId = req.user?.employee_id ?? null;
+
+  if (allowed === 'all') return { employeeId: requestedId || selfId };
+  if (allowed === 'own') {
+    if (!selfId) return { error: 'No employee record is linked to this account' };
+    return { employeeId: selfId };
+  }
+  return { error: 'You cannot record attendance' };
+}
 
 const ATT_SQL = `
   SELECT a.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
@@ -40,11 +61,6 @@ attendance.get('/today-status', can('attendance', 'read'), ah(async (req, res) =
 
 // List attendance records
 attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
-  const isHRManager = role === 'hr_manager';
-
   const status = req.query.status;
   const missingCheckout = req.query.missing_checkout === 'true' || req.query.missing_checkout === true;
   const search = req.query.search;
@@ -52,95 +68,38 @@ attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
   const where = [];
   const params = [];
 
-  if (isSelfOnly) {
-    params.push(selfId || 0);
+  // One visibility rule for the whole app, from the role matrix in auth.js.
+  const scopeSql = employeeScopeFilter(req, 'a.employee_id', params, 'attendance');
+  if (scopeSql) where.push(scopeSql);
+
+  if (req.query.employee_id) {
+    params.push(req.query.employee_id);
     where.push(`a.employee_id = $${params.length}`);
-  } else if (isHRManager) {
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      params.push(employeeId, selfId || 0);
-      where.push(`a.employee_id = $${params.length - 1} AND a.employee_id IN (
-        WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $${params.length}
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs
-      )`);
-    } else {
-      params.push(selfId || 0);
-      where.push(`a.employee_id IN (
-        WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $${params.length}
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs
-      )`);
-    }
-  } else {
-    // Admin: can filter by employee_id if provided
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      params.push(employeeId);
-      where.push(`a.employee_id = $${params.length}`);
-    }
   }
-
-  const isMissingFilter = missingCheckout || status === 'missing_checkout';
-
-  if (status && status !== 'missing_checkout') {
+  if (status) {
     params.push(status);
     where.push(`a.status = $${params.length}`);
   }
-  if (isMissingFilter) {
-    where.push(`a.check_out IS NULL`);
+  if (missingCheckout) {
+    where.push('a.check_out IS NULL');
   }
   if (search) {
     params.push(`%${search}%`);
     where.push(`e.name ILIKE $${params.length}`);
   }
 
-  // Calculate total missing checkout count across the scoped employee pool
-  let missingCountSql;
-  let missingCountParams;
-  if (isSelfOnly) {
-    missingCountSql = 'SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id = $1';
-    missingCountParams = [selfId || 0];
-  } else if (isHRManager) {
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      missingCountSql = `SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id = $1 AND employee_id IN (
-        WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $2
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs
-      )`;
-      missingCountParams = [employeeId, selfId || 0];
-    } else {
-      missingCountSql = `SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id IN (
-        WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $1
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs
-      )`;
-      missingCountParams = [selfId || 0];
-    }
-  } else {
-    // Admin: total missing checkouts across all (or for employee if filtered)
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      missingCountSql = 'SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id = $1';
-      missingCountParams = [employeeId];
-    } else {
-      missingCountSql = 'SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL';
-      missingCountParams = [];
-    }
+  // Missing-checkout total over the same scoped pool, so the banner never
+  // reports records the caller cannot see.
+  const countParams = [];
+  const countWhere = ['check_out IS NULL'];
+  const countScope = employeeScopeFilter(req, 'employee_id', countParams, 'attendance');
+  if (countScope) countWhere.push(countScope);
+  if (req.query.employee_id) {
+    countParams.push(req.query.employee_id);
+    countWhere.push(`employee_id = $${countParams.length}`);
   }
+  const missingCountSql = `SELECT COUNT(*)::int AS count FROM attendance WHERE ${countWhere.join(' AND ')}`;
+  const missingCountParams = countParams;
 
   const missingCountRow = await one(missingCountSql, missingCountParams);
   const missingCount = missingCountRow?.count || 0;
@@ -155,52 +114,21 @@ attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
 
 // Total missing count for scope
 attendance.get('/missing-count', can('attendance', 'read'), ah(async (req, res) => {
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
-  const isHRManager = role === 'hr_manager';
+  const params = [];
+  const where = ['check_out IS NULL'];
 
-  let sql;
-  let params;
-  if (isSelfOnly) {
-    sql = 'SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id = $1';
-    params = [selfId || 0];
-  } else if (isHRManager) {
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      sql = `SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id = $1 AND employee_id IN (
-        WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $2
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs
-      )`;
-      params = [employeeId, selfId || 0];
-    } else {
-      sql = `SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id IN (
-        WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $1
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs
-      )`;
-      params = [selfId || 0];
-    }
-  } else {
-    // Admin: can scope to specific employee or all
-    const employeeId = req.query.employee_id;
-    if (employeeId) {
-      sql = 'SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL AND employee_id = $1';
-      params = [employeeId];
-    } else {
-      sql = 'SELECT COUNT(*)::int AS count FROM attendance WHERE check_out IS NULL';
-      params = [];
-    }
+  const scopeSql = employeeScopeFilter(req, 'employee_id', params, 'attendance');
+  if (scopeSql) where.push(scopeSql);
+
+  if (req.query.employee_id) {
+    params.push(req.query.employee_id);
+    where.push(`employee_id = $${params.length}`);
   }
 
-  const row = await one(sql, params);
+  const row = await one(
+    `SELECT COUNT(*)::int AS count FROM attendance WHERE ${where.join(' AND ')}`,
+    params
+  );
   res.json({ data: { count: row?.count || 0 } });
 }));
 
@@ -209,28 +137,8 @@ attendance.get('/:id', can('attendance', 'read'), ah(async (req, res) => {
   const row = await one(`${ATT_SQL} WHERE a.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
 
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
-  const isHRManager = role === 'hr_manager';
-
-  if (isSelfOnly && row.employee_id !== selfId) {
+  if (!canSeeEmployee(req, row.employee_id, 'attendance')) {
     return res.status(403).json({ error: 'Cannot view attendance for another employee' });
-  }
-
-  if (isHRManager) {
-    const isAllowed = await one(
-      `WITH RECURSIVE subs AS (
-        SELECT id FROM employees WHERE id = $1
-        UNION ALL
-        SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-      )
-      SELECT id FROM subs WHERE id = $2`,
-      [selfId, row.employee_id]
-    );
-    if (!isAllowed) {
-      return res.status(403).json({ error: 'Cannot view attendance for an employee not under your management' });
-    }
   }
 
   res.json({ data: row });
@@ -328,29 +236,10 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
   if (!row) return res.status(404).json({ error: 'Not found' });
   if (row.check_out) return res.status(400).json({ error: 'Already checked out' });
 
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isOwn = Number(row.employee_id) === Number(selfId);
-  const isHRManager = role === 'hr_manager';
-  const isAdmin = role === 'admin';
-
-  if (!isOwn && !isAdmin) {
-    if (isHRManager) {
-      const isAllowed = await one(
-        `WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $1
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs WHERE id = $2`,
-        [selfId, row.employee_id]
-      );
-      if (!isAllowed) {
-        return res.status(403).json({ error: 'Cannot check out for an employee not under your management' });
-      }
-    } else {
-      return res.status(403).json({ error: 'You can only check out for your own attendance record' });
-    }
+  if (!canSeeEmployee(req, row.employee_id, 'attendance')) {
+    return res.status(403).json({ error: 'You can only check out for your own attendance record' });
+  }
+  {
   }
 
   // Calculate check_out time: if historical missed check-out (> 16 hours), cap to 8h shift
@@ -383,59 +272,26 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
 
 // Close all missed check-outs for user (or subordinates for HR Manager, or all for Admin)
 attendance.post('/close-missed-checkouts', can('attendance', 'write'), ah(async (req, res) => {
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  if (!selfId && role !== 'admin') {
+  const params = [];
+  const where = ["check_out IS NULL", "check_in < NOW() - INTERVAL '12 hours'"];
+
+  const scopeSql = employeeScopeFilter(req, 'employee_id', params, 'attendance');
+  if (scopeSql) where.push(scopeSql);
+
+  if (scope(req, 'attendance', 'write') === 'own' && !req.user?.employee_id) {
     return res.status(400).json({ error: 'No employee associated with this account' });
   }
 
-  let updatedRows = [];
-  if (role === 'admin') {
-    updatedRows = await query(
-      `UPDATE attendance
-          SET check_out = check_in + INTERVAL '8 hours',
-              status = 'present',
-              manual_edit = TRUE,
-              notes = COALESCE(notes, '') || ' [Closed missed check-out (8 hrs)]'
-        WHERE check_out IS NULL
-          AND check_in < NOW() - INTERVAL '12 hours'
-        RETURNING id`
-    );
-  } else if (role === 'hr_manager') {
-    updatedRows = await query(
-      `UPDATE attendance
-          SET check_out = check_in + INTERVAL '8 hours',
-              status = 'present',
-              manual_edit = TRUE,
-              notes = COALESCE(notes, '') || ' [Closed missed check-out (8 hrs)]'
-        WHERE check_out IS NULL
-          AND check_in < NOW() - INTERVAL '12 hours'
-          AND employee_id IN (
-            WITH RECURSIVE subs AS (
-              SELECT id FROM employees WHERE id = $1
-              UNION ALL
-              SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-            )
-            SELECT id FROM subs
-          )
-        RETURNING id`,
-      [selfId]
-    );
-  } else {
-    // Self-only (employee, payroll_user, payroll_manager)
-    updatedRows = await query(
-      `UPDATE attendance
-          SET check_out = check_in + INTERVAL '8 hours',
-              status = 'present',
-              manual_edit = TRUE,
-              notes = COALESCE(notes, '') || ' [Closed missed check-out (8 hrs)]'
-        WHERE check_out IS NULL
-          AND check_in < NOW() - INTERVAL '12 hours'
-          AND employee_id = $1
-        RETURNING id`,
-      [selfId]
-    );
-  }
+  const updatedRows = await query(
+    `UPDATE attendance
+        SET check_out = check_in + INTERVAL '8 hours',
+            status = 'present',
+            manual_edit = TRUE,
+            notes = COALESCE(notes, '') || ' [Closed missed check-out (8 hrs)]'
+      WHERE ${where.join(' AND ')}
+      RETURNING id`,
+    params
+  );
 
   const count = updatedRows.length;
   res.json({
@@ -446,37 +302,13 @@ attendance.post('/close-missed-checkouts', can('attendance', 'write'), ah(async 
 
 // Create attendance manually
 attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isSelfOnly = role === 'employee' || role === 'payroll_user' || role === 'payroll_manager';
-  const isHRManager = role === 'hr_manager';
-
-  if (role === 'admin') {
-    return res.status(403).json({ error: 'Admins do not log individual attendance entries' });
-  }
-
   let { employee_id, check_in, check_out, status = 'present', notes } = req.body;
 
-  if (isSelfOnly) {
-    employee_id = selfId;
-  } else if (isHRManager) {
-    if (!employee_id) {
-      employee_id = selfId;
-    } else if (Number(employee_id) !== Number(selfId)) {
-      const underManagement = await one(
-        `WITH RECURSIVE subs AS (
-          SELECT id FROM employees WHERE id = $1
-          UNION ALL
-          SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-        )
-        SELECT id FROM subs WHERE id = $2`,
-        [selfId, employee_id]
-      );
-      if (!underManagement) {
-        return res.status(403).json({ error: 'You can only log attendance for yourself or employees under your management' });
-      }
-    }
-  }
+  // 'own' write scope forces the caller's own record whatever the body says;
+  // 'all' may log for anyone, defaulting to themselves.
+  const target = writeTarget(req, employee_id);
+  if (target.error) return res.status(403).json({ error: target.error });
+  employee_id = target.employeeId;
 
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
   if (!check_in) return res.status(400).json({ error: 'Check-in time is required' });
@@ -516,47 +348,13 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
   // scoping rules below, since it overrides them for every non-admin caller.
   if (rejected(res, await blockManagerAttendance(req, existing.employee_id))) return;
 
-  const role = req.user?.role;
-  const selfId = req.user?.employee_id;
-  const isHRManager = role === 'hr_manager';
-  const isPayroll = role === 'payroll_user' || role === 'payroll_manager';
-
-  if (isPayroll && existing.employee_id !== selfId) {
+  if (!canSeeEmployee(req, existing.employee_id, 'attendance')) {
     return res.status(403).json({ error: 'Cannot edit attendance for another employee' });
   }
 
-  if (isHRManager) {
-    const isAllowed = await one(
-      `WITH RECURSIVE subs AS (
-        SELECT id FROM employees WHERE id = $1
-        UNION ALL
-        SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-      )
-      SELECT id FROM subs WHERE id = $2`,
-      [selfId, existing.employee_id]
-    );
-    if (!isAllowed) {
-      return res.status(403).json({ error: 'Cannot correct attendance for an employee not under your management' });
-    }
-  }
-
-  let employee_id = req.body.employee_id !== undefined ? req.body.employee_id : existing.employee_id;
-  if (isPayroll) {
-    employee_id = selfId;
-  } else if (isHRManager && employee_id) {
-    const isAllowed = await one(
-      `WITH RECURSIVE subs AS (
-        SELECT id FROM employees WHERE id = $1
-        UNION ALL
-        SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-      )
-      SELECT id FROM subs WHERE id = $2`,
-      [selfId, employee_id]
-    );
-    if (!isAllowed) {
-      return res.status(403).json({ error: 'Cannot assign attendance to an employee not under your management' });
-    }
-  }
+  const moved = writeTarget(req, req.body.employee_id ?? existing.employee_id);
+  if (moved.error) return res.status(403).json({ error: moved.error });
+  const employee_id = moved.employeeId;
 
   const check_in = req.body.check_in !== undefined ? req.body.check_in : existing.check_in;
   const check_out = req.body.check_out !== undefined ? req.body.check_out : existing.check_out;
@@ -585,7 +383,7 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
 }));
 
 // Delete attendance record
-attendance.delete('/:id', can('employees', 'write'), ah(async (req, res) => {
+attendance.delete('/:id', can('attendance', 'delete'), ah(async (req, res) => {
   const existing = await one('SELECT employee_id FROM attendance WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
@@ -593,19 +391,8 @@ attendance.delete('/:id', can('employees', 'write'), ah(async (req, res) => {
   // Admin-only rule for managers applies here too.
   if (rejected(res, await blockManagerAttendance(req, existing.employee_id))) return;
 
-  if (req.user?.role === 'hr_manager') {
-    const isAllowed = await one(
-      `WITH RECURSIVE subs AS (
-        SELECT id FROM employees WHERE id = $1
-        UNION ALL
-        SELECT e.id FROM employees e JOIN subs ON e.manager_id = subs.id
-      )
-      SELECT id FROM subs WHERE id = $2`,
-      [req.user?.employee_id, existing.employee_id]
-    );
-    if (!isAllowed) {
-      return res.status(403).json({ error: 'Cannot delete attendance for an employee not under your management' });
-    }
+  if (!canSeeEmployee(req, existing.employee_id, 'attendance')) {
+    return res.status(403).json({ error: 'Cannot delete attendance for another employee' });
   }
 
   await query('DELETE FROM attendance WHERE id = $1', [req.params.id]);

@@ -1,10 +1,10 @@
 /** Salary structures & rules, Payrun wizard, Payslips, PDF, bulk email (A5, A6, B5-B8). */
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
-import { can, scopeToSelf } from '../auth.js';
+import { can } from '../auth.js';
 import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 import { crudRouter, ah } from '../lib/crud.js';
-import { computePayslip, getPayslip, contractForPeriod, periodStats, collectWarnings } from '../lib/payroll.js';
+import { computePayslip, getPayslip, contractForPeriod, periodStats } from '../lib/payroll.js';
 import { renderPayslipPdf } from '../lib/pdf.js';
 import { sendPayslipMail } from '../lib/mail.js';
 
@@ -48,19 +48,21 @@ export const rules = crudRouter({
   filters: { structure_id: 'r.structure_id', category: 'r.category' },
   searchCol: 'r.name',
   orderBy: 'r.sequence, r.id',
+  hooks: {
+    // Readable duplicate-code message instead of a raw unique-violation.
+    beforeCreate: async (req) => {
+      if (!req.body.code || !req.body.structure_id) return null;
+      const dup = await one(
+        'SELECT id FROM salary_rules WHERE structure_id = $1 AND code = $2',
+        [req.body.structure_id, req.body.code]
+      );
+      return dup
+        ? { status: 400, error: `Rule code '${req.body.code}' already exists in this structure` }
+        : null;
+    },
+  },
 });
 
-/** Guard: duplicate rule code within the same structure → 400, not a raw DB error. */
-rules.post('/', can('rules', 'write'), ah(async (req, res, next) => {
-  if (req.body.code && req.body.structure_id) {
-    const dup = await one(
-      'SELECT id FROM salary_rules WHERE structure_id = $1 AND code = $2',
-      [req.body.structure_id, req.body.code]
-    );
-    if (dup) return res.status(400).json({ error: `Rule code '${req.body.code}' already exists in this structure` });
-  }
-  next();
-}));
 
 /** Dry-run a rule set against a sample context so config screens are not blind. */
 rules.post('/preview', can('rules', 'read'), ah(async (req, res) => {
@@ -89,6 +91,20 @@ const PAYRUN_SQL = `
     JOIN salary_structures s ON s.id = p.structure_id
     LEFT JOIN departments d ON d.id = p.department_id`;
 
+/**
+ * Immutability guard: validated/paid payruns are historical records.
+ * Passed in as hooks — registering these on the router afterwards would be dead
+ * code, because the factory already owns PATCH /:id and DELETE /:id.
+ */
+async function payrunIsMutable(req) {
+  const run = await one('SELECT state FROM payruns WHERE id = $1', [req.params.id]);
+  if (!run) return { status: 404, error: 'Not found' };
+  if (['validated', 'paid'].includes(run.state)) {
+    return { status: 400, error: `Cannot modify a ${run.state} payrun — it is a historical record` };
+  }
+  return null;
+}
+
 export const payruns = crudRouter({
   table: 'payruns',
   module: 'payruns',
@@ -99,23 +115,11 @@ export const payruns = crudRouter({
   filters: { state: 'p.state', structure_id: 'p.structure_id', department_id: 'p.department_id' },
   searchCol: 'p.name',
   orderBy: 'p.period_start DESC, p.id DESC',
+  hooks: {
+    beforeUpdate: payrunIsMutable,
+    beforeDelete: payrunIsMutable,
+  },
 });
-
-/** Immutability guard: validated/paid payruns cannot be modified or deleted. */
-payruns.patch('/:id', can('payruns', 'write'), ah(async (req, res, next) => {
-  const run = await one('SELECT state FROM payruns WHERE id = $1', [req.params.id]);
-  if (!run) return res.status(404).json({ error: 'Not found' });
-  if (['validated', 'paid'].includes(run.state))
-    return res.status(400).json({ error: `Cannot modify a ${run.state} payrun — it is a historical record` });
-  next();
-}));
-payruns.delete('/:id', can('payruns', 'write'), ah(async (req, res, next) => {
-  const run = await one('SELECT state FROM payruns WHERE id = $1', [req.params.id]);
-  if (!run) return res.status(404).json({ error: 'Not found' });
-  if (['validated', 'paid'].includes(run.state))
-    return res.status(400).json({ error: `Cannot delete a ${run.state} payrun — it is a historical record` });
-  next();
-}));
 
 /**
  * Wizard step 2: eligible employees for the chosen scope + period.
@@ -235,7 +239,7 @@ payruns.post('/:id/validate', can('payruns', 'write'), ah(async (req, res) => {
   const blocking = run.payslips.flatMap((p) =>
     (p.warnings || []).filter((w) => w.level === 'error').map((w) => `${p.employee_name}: ${w.message}`)
   );
-  if (blocking.length && !req.body.force)
+  if (blocking.length && !(req.body.force && req.user?.role === 'admin'))
     return res.status(400).json({ error: 'Resolve blocking warnings before validating', blockers: blocking });
 
   await tx(async (c) => {

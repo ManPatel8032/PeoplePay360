@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { query, one } from '../db.js';
-import { MATRIX } from '../auth.js';
+import { permissionsFor } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import {
   signAccessToken,
@@ -25,6 +25,9 @@ const DUMMY_HASH = '$2a$10$wT8Kz0g1F2l6w0fM2u9AjeB9pL8z0u0b2Z0k0i0l0e0p0a0t0e0l0
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10,
+  // Count only FAILED attempts. Counting successful logins locks a demo out
+  // after ten legitimate role switches, which is not what the limit is for.
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (_req, res) => {
@@ -320,7 +323,7 @@ authRouter.get('/me', ah(async (req, res) => {
   res.json({
     data: {
       user: req.user,
-      permissions: MATRIX,
+      permissions: permissionsFor(req.user?.role),
     },
   });
 }));
