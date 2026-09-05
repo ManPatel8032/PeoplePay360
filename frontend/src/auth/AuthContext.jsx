@@ -65,14 +65,6 @@ export function AuthProvider({ children }) {
     return res.user;
   }, [loadMe]);
 
-  const register = useCallback(async (email, password) => {
-    const res = await api.post('/auth/register', { email, password });
-    setAccessToken(res.accessToken);
-    setUser(res.user);
-    await loadMe().catch(() => {});
-    return res.user;
-  }, [loadMe]);
-
   const logout = useCallback(async () => {
     try { await api.post('/auth/logout'); } catch { /* revoke best-effort */ }
     clear();
@@ -103,8 +95,8 @@ export function AuthProvider({ children }) {
   }, [can]);
 
   const value = useMemo(
-    () => ({ user, permissions, booting, login, register, logout, changePassword, canRead, can }),
-    [user, permissions, booting, login, register, logout, changePassword, canRead, can]
+    () => ({ user, permissions, booting, login, logout, changePassword, canRead, can }),
+    [user, permissions, booting, login, logout, changePassword, canRead, can]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

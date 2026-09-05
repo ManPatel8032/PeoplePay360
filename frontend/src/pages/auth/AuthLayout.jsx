@@ -1,4 +1,4 @@
-/** Shared frame for the logged-out screens: login, signup, change password. */
+/** Shared frame for the logged-out screens: login, change password. */
 export default function AuthLayout({ title, subtitle, children, footer }) {
   return (
     <div className="auth-shell">

@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from './auth/AuthContext.jsx';
 import { RequireAuth, RequireRole, RedirectIfAuthed } from './auth/guards.jsx';
 
 import LoginPage from './pages/auth/LoginPage.jsx';
-import SignupPage from './pages/auth/SignupPage.jsx';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage.jsx';
 
 import Dashboard from './pages/Dashboard.jsx';
@@ -145,7 +144,7 @@ function AppRoutes() {
 
         {/* Public */}
         <Route path="/login"  element={<RedirectIfAuthed><LoginPage /></RedirectIfAuthed>} />
-        <Route path="/signup" element={<RedirectIfAuthed><SignupPage /></RedirectIfAuthed>} />
+        <Route path="/signup" element={<Navigate to="/login" replace />} />
         <Route path="/change-password" element={<RequireAuth><ChangePasswordPage /></RequireAuth>} />
 
         <Route path="/dashboard" element={<Guarded module="dashboard"><Dashboard /></Guarded>} />

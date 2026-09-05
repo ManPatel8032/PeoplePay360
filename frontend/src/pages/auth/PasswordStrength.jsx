@@ -1,5 +1,5 @@
 /**
- * Password policy, shared by signup and change-password.
+ * Password policy, used by change-password.
  * The server enforces the 10-character minimum; the extra checks here are
  * guidance, so the meter never claims a password is acceptable when it is not.
  */

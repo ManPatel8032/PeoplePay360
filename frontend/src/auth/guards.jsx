@@ -47,7 +47,7 @@ export function RequireRole({ module, children }) {
   return children;
 }
 
-/** Already logged in -> bounce away from /login and /signup. */
+/** Already logged in -> bounce away from /login. */
 export function RedirectIfAuthed({ children }) {
   const { user, booting } = useAuth();
   if (booting) return <Booting />;

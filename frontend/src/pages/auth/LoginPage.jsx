@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import AuthLayout from './AuthLayout.jsx';
 
@@ -54,12 +54,7 @@ export default function LoginPage() {
     <AuthLayout
       title="Sign in"
       subtitle="HR and payroll operations for your organisation."
-      footer={
-        <>
-          Employee with a work email but no account yet?{' '}
-          <Link to="/signup" className="auth-link">Create one</Link>
-        </>
-      }
+      footer="Need an account? Contact your HR administrator."
     >
       <form onSubmit={onSubmit} noValidate>
         {error && (
