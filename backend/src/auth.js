@@ -17,7 +17,7 @@ export const MATRIX = {
   timeoff_approve: { read: 'hr_manager',   write: 'hr_manager' },
   allocations:     { read: 'employee',     write: 'hr_manager' },
   payruns:         { read: 'payroll_user', write: 'payroll_user' },
-  payslips:        { read: 'payroll_user', write: 'payroll_user' },
+  payslips:        { read: 'employee',     write: 'payroll_user' },
   structures:      { read: 'payroll_user', write: 'payroll_manager' },
   rules:           { read: 'payroll_user', write: 'payroll_manager' },
   dashboard:       { read: 'payroll_user', write: 'admin' },

@@ -1,7 +1,7 @@
 /** Salary structures & rules, Payrun wizard, Payslips, PDF, bulk email (A5, A6, B5-B8). */
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
-import { can } from '../auth.js';
+import { can, scopeToSelf } from '../auth.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { computePayslip, getPayslip, contractForPeriod, periodStats, collectWarnings } from '../lib/payroll.js';
 import { renderPayslipPdf } from '../lib/pdf.js';
@@ -47,6 +47,18 @@ export const rules = crudRouter({
   orderBy: 'r.sequence, r.id',
 });
 
+/** Guard: duplicate rule code within the same structure → 400, not a raw DB error. */
+rules.post('/', can('rules', 'write'), ah(async (req, res, next) => {
+  if (req.body.code && req.body.structure_id) {
+    const dup = await one(
+      'SELECT id FROM salary_rules WHERE structure_id = $1 AND code = $2',
+      [req.body.structure_id, req.body.code]
+    );
+    if (dup) return res.status(400).json({ error: `Rule code '${req.body.code}' already exists in this structure` });
+  }
+  next();
+}));
+
 /** Dry-run a rule set against a sample context so config screens are not blind. */
 rules.post('/preview', can('rules', 'read'), ah(async (req, res) => {
   const { structure_id, employee_id, period_start, period_end } = req.body;
@@ -84,6 +96,22 @@ export const payruns = crudRouter({
   searchCol: 'p.name',
   orderBy: 'p.period_start DESC, p.id DESC',
 });
+
+/** Immutability guard: validated/paid payruns cannot be modified or deleted. */
+payruns.patch('/:id', can('payruns', 'write'), ah(async (req, res, next) => {
+  const run = await one('SELECT state FROM payruns WHERE id = $1', [req.params.id]);
+  if (!run) return res.status(404).json({ error: 'Not found' });
+  if (['validated', 'paid'].includes(run.state))
+    return res.status(400).json({ error: `Cannot modify a ${run.state} payrun — it is a historical record` });
+  next();
+}));
+payruns.delete('/:id', can('payruns', 'write'), ah(async (req, res, next) => {
+  const run = await one('SELECT state FROM payruns WHERE id = $1', [req.params.id]);
+  if (!run) return res.status(404).json({ error: 'Not found' });
+  if (['validated', 'paid'].includes(run.state))
+    return res.status(400).json({ error: `Cannot delete a ${run.state} payrun — it is a historical record` });
+  next();
+}));
 
 /**
  * Wizard step 2: eligible employees for the chosen scope + period.
@@ -197,6 +225,8 @@ payruns.post('/:id/validate', can('payruns', 'write'), ah(async (req, res) => {
   const run = await payrunDetail(req.params.id);
   if (!run) return res.status(404).json({ error: 'Not found' });
   if (run.state === 'draft') return res.status(400).json({ error: 'Compute the payrun first' });
+  if (['validated', 'paid'].includes(run.state))
+    return res.status(400).json({ error: `Payrun is already ${run.state}` });
 
   const blocking = run.payslips.flatMap((p) =>
     (p.warnings || []).filter((w) => w.level === 'error').map((w) => `${p.employee_name}: ${w.message}`)
@@ -248,9 +278,24 @@ payruns.post('/:id/send-payslips', can('payruns', 'write'), ah(async (req, res) 
 // ---------- Payslips (B7, B8) ----------
 export const payslips = Router();
 
+/** Helper: enforce employee-only access to own payslips. */
+function enforceSelfScope(req, slip) {
+  const selfId = scopeToSelf(req);
+  if (selfId && slip.employee_id !== selfId) return false;
+  return true;
+}
+
 payslips.get('/', can('payslips', 'read'), ah(async (req, res) => {
   const params = [];
   const where = [];
+
+  // Employee security: employees can ONLY see their own payslips
+  const selfId = scopeToSelf(req);
+  if (selfId) {
+    params.push(selfId);
+    where.push(`ps.employee_id = $${params.length}`);
+  }
+
   for (const [q, col] of Object.entries({ payrun_id: 'ps.payrun_id', employee_id: 'ps.employee_id', state: 'ps.state' })) {
     if (req.query[q]) { params.push(req.query[q]); where.push(`${col} = $${params.length}`); }
   }
@@ -272,6 +317,8 @@ payslips.get('/', can('payslips', 'read'), ah(async (req, res) => {
 payslips.get('/:id', can('payslips', 'read'), ah(async (req, res) => {
   const data = await getPayslip(req.params.id);
   if (!data) return res.status(404).json({ error: 'Not found' });
+  if (!enforceSelfScope(req, data))
+    return res.status(403).json({ error: 'You can only view your own payslips' });
   res.json({ data });
 }));
 
@@ -282,6 +329,8 @@ payslips.post('/:id/compute', can('payslips', 'write'), ah(async (req, res) => {
 payslips.get('/:id/pdf', can('payslips', 'read'), ah(async (req, res) => {
   const slip = await getPayslip(req.params.id);
   if (!slip) return res.status(404).json({ error: 'Not found' });
+  if (!enforceSelfScope(req, slip))
+    return res.status(403).json({ error: 'You can only download your own payslip' });
   const pdf = await renderPayslipPdf(slip);
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition',

@@ -6,6 +6,7 @@
  * Owned by Track C after handoff, but usable by everyone as a reference page.
  */
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -23,6 +24,7 @@ const endOfThisMonth = () => {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [filters, setFilters] = useState({
     period_start: monthsAgo(5),
     period_end: endOfThisMonth(),
@@ -136,7 +138,15 @@ export default function Dashboard() {
                 {data.alerts.length === 0
                   ? <div className="state"><h3>All clear</h3><p className="muted">No payroll issues for these filters.</p></div>
                   : <div style={{ display: 'grid', gap: 8 }}>
-                      {data.alerts.map((a, i) => <Alert key={i} level={a.level}>{a.message}</Alert>)}
+                      {data.alerts.map((a, i) => (
+                        <div key={i} onClick={() => a.link && navigate(a.link)}
+                             style={{ cursor: a.link ? 'pointer' : 'default' }}>
+                          <Alert level={a.level}>
+                            <span>{a.message}</span>
+                            {a.link && <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>→ View</span>}
+                          </Alert>
+                        </div>
+                      ))}
                     </div>}
               </Card>
 

@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { api, getUserId, setUserId } from './api.js';
 import Dashboard from './pages/Dashboard.jsx';
 import Placeholder from './pages/Placeholder.jsx';
+import PayrollIndex from './pages/payroll/PayrollIndex.jsx';
+import ConfigIndex from './pages/config/ConfigIndex.jsx';
 
 const LINKS = [
   { to: '/dashboard',  label: 'Dashboard' },
@@ -71,8 +73,8 @@ export default function App() {
             <Route path="/time-off/*" element={<Placeholder title="Time Off" owner="Section 2" />} />
 
             {/* Section 3 — Payroll, Payslips & Reporting */}
-            <Route path="/payroll/*" element={<Placeholder title="Payroll" owner="Section 3" />} />
-            <Route path="/config/*" element={<Placeholder title="Configuration" owner="Section 3" />} />
+            <Route path="/payroll/*" element={<PayrollIndex />} />
+            <Route path="/config/*" element={<ConfigIndex />} />
 
             <Route path="*" element={<div className="state"><h3>Page not found</h3></div>} />
           </Routes>
