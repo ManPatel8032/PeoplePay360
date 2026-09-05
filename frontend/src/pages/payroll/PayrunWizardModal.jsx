@@ -146,7 +146,7 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
       {step === 2 && (
         <>
           <p className="meta" style={{ marginBottom: 12 }}>
-            {eligible.length} employee(s) found · {selected.size} selected
+            {eligible.length} employee(s) found · {selected.size} selected · Period: <strong>{form.period_start} → {form.period_end}</strong> ({form.period_start && form.period_end ? Math.round((new Date(form.period_end) - new Date(form.period_start)) / 86400000) + 1 : 0} days)
           </p>
 
           <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
@@ -159,7 +159,7 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
                   </th>
                   <th style={{ padding: '8px 12px', textAlign: 'left', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Employee</th>
                   <th style={{ padding: '8px 12px', textAlign: 'left', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Department</th>
-                  <th style={{ padding: '8px 12px', textAlign: 'right', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Wage</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'right', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Monthly Wage</th>
                   <th style={{ padding: '8px 12px', textAlign: 'left', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Status</th>
                 </tr>
               </thead>

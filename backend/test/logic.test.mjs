@@ -93,3 +93,65 @@ test('Section 2: leave balance maths (18 allocated - 3 taken = 15 remaining)', (
   assert.equal(requested > remaining, true);
 });
 
+test('payroll proration: full month retains 100% of wage', async () => {
+  const { buildPayrollContext } = await import('../src/lib/payroll.js');
+  const contract = { wage: 90000 };
+  const stats = { workedDays: 22, workingDays: 22, attendedDays: 22, attendanceHours: 176, overtimeHours: 0, paidLeaveDays: 0, unpaidLeaveDays: 0, leaveDays: 0, lateDays: 0 };
+
+  // September full month (30 days)
+  const ctxSept = buildPayrollContext(contract, stats, '2026-09-01', '2026-09-30');
+  assert.equal(ctxSept.period_days, 30);
+  assert.equal(ctxSept.month_days, 30);
+  assert.equal(ctxSept.period_ratio, 1);
+  assert.equal(ctxSept.wage, 90000);
+
+  // August full month (31 days)
+  const ctxAug = buildPayrollContext(contract, stats, '2026-08-01', '2026-08-31');
+  assert.equal(ctxAug.period_days, 31);
+  assert.equal(ctxAug.month_days, 31);
+  assert.equal(ctxAug.period_ratio, 1);
+  assert.equal(ctxAug.wage, 90000);
+});
+
+test('payroll proration: custom 10-day period prorates proportionally (10/30 = 1/3)', async () => {
+  const { buildPayrollContext } = await import('../src/lib/payroll.js');
+  const contract = { wage: 90000 };
+  // 10-day period (e.g. 2026-09-01 to 2026-09-10) with 8 scheduled working days
+  const stats = { workedDays: 8, workingDays: 8, attendedDays: 8, attendanceHours: 64, overtimeHours: 0, paidLeaveDays: 0, unpaidLeaveDays: 0, leaveDays: 0, lateDays: 0 };
+
+  const ctx = buildPayrollContext(contract, stats, '2026-09-01', '2026-09-10');
+  assert.equal(ctx.period_days, 10);
+  assert.equal(ctx.month_days, 30);
+  assert.equal(round2(ctx.period_ratio), round2(10 / 30)); // 1/3
+  assert.equal(ctx.wage, 30000); // exactly 1/3 of 90000
+
+  // Verify that salary rule formulas scale accurately to 10 days
+  ctx.RULE = {};
+  ctx.CAT = { BASIC: 0, ALW: 0, DED: 0 };
+
+  const basic = evalFormula('wage * 0.5 * (working_days ? worked_days / working_days : 1)', ctx);
+  assert.equal(round2(basic), 15000); // 1/3 of 45000 monthly basic
+  ctx.RULE.BASIC = round2(basic);
+  ctx.CAT.BASIC = round2(basic);
+
+  const hra = round2(ctx.RULE.BASIC * 0.4);
+  assert.equal(hra, 6000); // 1/3 of 18000 monthly HRA
+  ctx.RULE.HRA = hra;
+
+  // Fixed allowances scaled by period_ratio (10/30)
+  const conv = round2(1600 * ctx.period_ratio);
+  const med = round2(1250 * ctx.period_ratio);
+  assert.equal(conv, 533.33);
+  assert.equal(med, 416.67);
+  ctx.RULE.CONV = conv;
+  ctx.RULE.MED = med;
+
+  const spec = evalFormula('Math.max(0, wage * (working_days ? worked_days / working_days : 1) - RULE.BASIC - RULE.HRA - RULE.CONV - RULE.MED)', ctx);
+  assert.equal(round2(spec), 8050); // exactly 1/3 of 24150 monthly special allowance
+  ctx.RULE.SPEC = round2(spec);
+
+  const gross = ctx.CAT.BASIC + ctx.RULE.HRA + ctx.RULE.CONV + ctx.RULE.MED + ctx.RULE.SPEC;
+  assert.equal(round2(gross), 30000); // total gross matches 10-day prorated wage (30000)
+});
+
+

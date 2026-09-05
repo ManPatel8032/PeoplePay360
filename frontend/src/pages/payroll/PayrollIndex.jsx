@@ -2,7 +2,8 @@
  * Payroll landing page (Section 3) — tabs for Payruns and Payslips.
  * Clicking a payrun drills into PayrunDetail.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import PayrunList from './PayrunList.jsx';
 import PayrunDetail from './PayrunDetail.jsx';
 import PayslipList from './PayslipList.jsx';
@@ -13,8 +14,23 @@ const TABS = [
 ];
 
 export default function PayrollIndex() {
-  const [tab, setTab] = useState('payruns');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTab = searchParams.get('tab');
+  const [tab, setTab] = useState(urlTab === 'payslips' ? 'payslips' : 'payruns');
   const [selectedRun, setSelectedRun] = useState(null);
+
+  useEffect(() => {
+    if (urlTab === 'payslips' || urlTab === 'payruns') {
+      setTab(urlTab);
+    }
+  }, [urlTab]);
+
+  const handleTabChange = (key) => {
+    setTab(key);
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', key);
+    setSearchParams(next);
+  };
 
   if (selectedRun) {
     return (
@@ -32,7 +48,7 @@ export default function PayrollIndex() {
           <button
             key={t.key}
             className={`btn btn-sm ${tab === t.key ? 'btn-primary' : ''}`}
-            onClick={() => setTab(t.key)}
+            onClick={() => handleTabChange(t.key)}
           >
             {t.label}
           </button>

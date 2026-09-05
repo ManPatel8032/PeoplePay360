@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States } from '../../components/ui.jsx';
+import { useApi, States, SearchInput, Alert } from '../../components/ui.jsx';
+
 
 import EmployeeList from './EmployeeList.jsx';
 import EmployeeKanban from './EmployeeKanban.jsx';
@@ -10,6 +12,8 @@ import EmployeeFormModal from './EmployeeFormModal.jsx';
 
 export default function EmployeesPage() {
   const { user, can } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const missingBank = searchParams.get('missing_bank') === 'true';
 
   const [viewMode, setViewMode] = useState('list');
   const [search, setSearch] = useState('');
@@ -50,9 +54,11 @@ export default function EmployeesPage() {
           e.name?.toLowerCase().includes(q) ||
           e.work_email?.toLowerCase().includes(q) ||
           e.job_position_name?.toLowerCase().includes(q) ||
-          e.department_name?.toLowerCase().includes(q)
+          e.department_name?.toLowerCase().includes(q) ||
+          e.employee_number?.toLowerCase().includes(q)
       );
     }
+
 
     if (departmentFilter) {
       result = result.filter((e) => String(e.department_id) === String(departmentFilter));
@@ -66,8 +72,12 @@ export default function EmployeesPage() {
       result = result.filter((e) => e.employee_type === typeFilter);
     }
 
+    if (missingBank) {
+      result = result.filter((e) => !e.bank_account && e.status !== 'inactive');
+    }
+
     return result;
-  }, [rawEmployees, search, departmentFilter, statusFilter, typeFilter]);
+  }, [rawEmployees, search, departmentFilter, statusFilter, typeFilter, missingBank]);
 
   // Employee self-view
   if (isEmployeeSelfScope) {
@@ -136,18 +146,37 @@ export default function EmployeesPage() {
             </div>
           </div>
 
+          {missingBank && (
+            <div style={{ marginBottom: 16 }}>
+              <Alert level="warning">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 12 }}>
+                  <span>Filtered by: <strong>Employees missing bank details</strong> ({filteredEmployees.length} found)</span>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => {
+                      const next = new URLSearchParams(searchParams);
+                      next.delete('missing_bank');
+                      setSearchParams(next);
+                    }}
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              </Alert>
+            </div>
+          )}
+
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div className="row" style={{ flex: 1 }}>
-                <input
+                <SearchInput
                   id="search-employees"
-                  type="text"
-                  className="input"
                   placeholder="Search employees..."
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ width: 240, minHeight: 34 }}
+                  onChange={setSearch}
+                  style={{ width: 250 }}
                 />
+
 
                 <select
                   className="select"

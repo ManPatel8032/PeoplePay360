@@ -158,10 +158,13 @@ function AppRoutes() {
         <Route path="/contracts/*"  element={<Guarded module="contracts"><ContractsPage /></Guarded>} />
         <Route path="/attendance/*" element={<Guarded module="attendance"><AttendancePage /></Guarded>} />
         <Route path="/schedules/*"  element={<Guarded module="schedules"><SchedulesPage /></Guarded>} />
+        <Route path="/time-off/requests" element={<Navigate to="/time-off?tab=requests&state=to_approve" replace />} />
         <Route path="/time-off/*"   element={<Guarded module="timeoff"><TimeOffPage /></Guarded>} />
 
         {/* Section 3 — Payroll, Payslips & Reporting */}
         <Route path="/payroll/*" element={<Guarded module="payruns"><PayrollIndex /></Guarded>} />
+        <Route path="/payruns/*" element={<Navigate to="/payroll?tab=payruns" replace />} />
+        <Route path="/payslips/*" element={<Navigate to="/payroll?tab=payslips" replace />} />
         <Route path="/config/*"  element={<Guarded module="structures"><ConfigIndex /></Guarded>} />
 
         <Route path="*" element={<div className="state"><h3>Page not found</h3></div>} />

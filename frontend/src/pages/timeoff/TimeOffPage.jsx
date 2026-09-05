@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn, SearchInput } from '../../components/ui.jsx';
+
 import LeaveBalanceWidget from '../../components/LeaveBalanceWidget.jsx';
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -46,7 +47,16 @@ export default function TimeOffPage() {
   }, [employeeIdFilter, employees.data, isEmployee, user?.employee_id]);
 
   // =================== REQUESTS TAB ===================
-  const [requestFilterState, setRequestFilterState] = useState('all'); // 'all', 'to_approve', 'approved', 'refused'
+  const urlReqState = searchParams.get('state');
+  const [requestFilterState, setRequestFilterState] = useState(urlReqState || 'all'); // 'all', 'to_approve', 'approved', 'refused'
+
+  useEffect(() => {
+    const s = searchParams.get('state');
+    if (s && s !== requestFilterState) {
+      setRequestFilterState(s);
+    }
+  }, [searchParams]);
+  const [requestSearch, setRequestSearch] = useState('');
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false);
   const [reqSaving, setReqSaving] = useState(false);
   const [reqFormError, setReqFormError] = useState(null);
@@ -59,11 +69,13 @@ export default function TimeOffPage() {
       else if (requestFilterState === 'approved') q.set('state', 'approved');
       else if (requestFilterState === 'refused') q.set('state', 'refused');
       else if (requestFilterState === 'cancelled') q.set('state', 'cancelled');
+      if (requestSearch) q.set('search', requestSearch);
       const qs = q.toString();
       return api.get(`/time-off/requests${qs ? '?' + qs : ''}`);
     },
-    [effectiveEmpId, requestFilterState]
+    [effectiveEmpId, requestFilterState, requestSearch]
   );
+
 
   // New Request Form
   const [reqForm, setReqForm] = useState({
@@ -688,40 +700,50 @@ export default function TimeOffPage() {
       {/* TAB 1: REQUESTS */}
       {activeTab === 'requests' && (
         <>
-          <div className="row" style={{ marginBottom: 16 }}>
-            <button
-              className={`btn btn-sm ${requestFilterState === 'all' ? 'btn-primary' : ''}`}
-              onClick={() => setRequestFilterState('all')}
-            >
-              All Requests
-            </button>
-            {!isEmployee && (
+          <div className="row" style={{ marginBottom: 16, justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
               <button
-                className={`btn btn-sm ${requestFilterState === 'to_approve' ? 'btn-primary' : ''}`}
-                onClick={() => setRequestFilterState('to_approve')}
+                className={`btn btn-sm ${requestFilterState === 'all' ? 'btn-primary' : ''}`}
+                onClick={() => setRequestFilterState('all')}
               >
-                Needs My Approval ({pendingRequestsCount})
+                All Requests
               </button>
-            )}
-            <button
-              className={`btn btn-sm ${requestFilterState === 'approved' ? 'btn-primary' : ''}`}
-              onClick={() => setRequestFilterState('approved')}
-            >
-              Approved
-            </button>
-            <button
-              className={`btn btn-sm ${requestFilterState === 'refused' ? 'btn-primary' : ''}`}
-              onClick={() => setRequestFilterState('refused')}
-            >
-              Refused
-            </button>
-            <button
-              className={`btn btn-sm ${requestFilterState === 'cancelled' ? 'btn-primary' : ''}`}
-              onClick={() => setRequestFilterState('cancelled')}
-            >
-              Cancelled
-            </button>
+              {!isEmployee && (
+                <button
+                  className={`btn btn-sm ${requestFilterState === 'to_approve' ? 'btn-primary' : ''}`}
+                  onClick={() => setRequestFilterState('to_approve')}
+                >
+                  Needs My Approval ({pendingRequestsCount})
+                </button>
+              )}
+              <button
+                className={`btn btn-sm ${requestFilterState === 'approved' ? 'btn-primary' : ''}`}
+                onClick={() => setRequestFilterState('approved')}
+              >
+                Approved
+              </button>
+              <button
+                className={`btn btn-sm ${requestFilterState === 'refused' ? 'btn-primary' : ''}`}
+                onClick={() => setRequestFilterState('refused')}
+              >
+                Refused
+              </button>
+              <button
+                className={`btn btn-sm ${requestFilterState === 'cancelled' ? 'btn-primary' : ''}`}
+                onClick={() => setRequestFilterState('cancelled')}
+              >
+                Cancelled
+              </button>
+            </div>
+
+            <SearchInput
+              placeholder="Search employee or leave type..."
+              value={requestSearch}
+              onChange={setRequestSearch}
+              style={{ width: 280 }}
+            />
           </div>
+
 
           <States loading={reqLoading} error={reqError} empty={!requests?.length} onRetry={reloadRequests}>
             <Card pad={false}>

@@ -2,10 +2,11 @@
  * Salary Rules (A6) — rule editor with sequence ordering, compute type switching,
  * and live preview tester calling /api/rules/preview.
  */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { api, moneyExact } from '../../api.js';
-import { useApi, States, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
+import { useApi, States, Table, Badge, Modal, Field, Alert, SearchInput } from '../../components/ui.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
+
 
 const CATEGORIES = ['BASIC', 'ALW', 'GROSS', 'DED', 'NET'];
 const COMPUTE_TYPES = ['fixed', 'percent', 'formula'];
@@ -23,6 +24,7 @@ export default function SalaryRules({ structureId, structureName, onBack }) {
   const [form, setForm] = useState(emptyRule);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
 
   // Preview state
   const [preview, setPreview] = useState(null);
@@ -34,6 +36,18 @@ export default function SalaryRules({ structureId, structureName, onBack }) {
     () => api.get(`/structures/${structureId}/rules`), [structureId]
   );
   const { data: employees } = useApi(() => api.get('/employees'), []);
+
+  const visible = useMemo(() => {
+    if (!rules) return [];
+    if (!search.trim()) return rules;
+    const q = search.trim().toLowerCase();
+    return rules.filter((r) =>
+      r.name?.toLowerCase().includes(q) ||
+      r.code?.toLowerCase().includes(q) ||
+      r.category?.toLowerCase().includes(q)
+    );
+  }, [rules, search]);
+
 
   const open = (row) => {
     setForm(row
@@ -123,10 +137,21 @@ export default function SalaryRules({ structureId, structureName, onBack }) {
         {canEditRules && <button className="btn btn-primary" onClick={() => open(null)}>+ New Rule</button>}
       </div>
 
-      <States loading={loading} error={loadErr} empty={!rules?.length}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ maxWidth: 350 }}>
+          <SearchInput
+            placeholder="Search rule name, code, category..."
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
+      </div>
+
+      <States loading={loading} error={loadErr} empty={!visible?.length}
              emptyText="No rules yet — add your first rule to define the salary computation" onRetry={reload}>
-        <Table columns={columns} rows={rules} onRowClick={open} />
+        <Table columns={columns} rows={visible} onRowClick={open} />
       </States>
+
 
       {/* Rule Preview Panel */}
       <div style={{ marginTop: 24 }}>

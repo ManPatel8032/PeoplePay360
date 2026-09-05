@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn, SearchInput } from '../../components/ui.jsx';
+
 
 function formatDateTime(isoStr) {
   if (!isoStr) return '—';
@@ -39,8 +40,15 @@ export default function AttendancePage() {
   const employeeIdFilter = searchParams.get('employee_id') || '';
   const effectiveEmpId = isSelfOnly && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const statusFilter = searchParams.get('status') || '';
+  const searchFilter = searchParams.get('search') || '';
   const isMissingFromUrl = statusFilter === 'missing_checkout' || searchParams.get('missing_checkout') === 'true';
   const [missingOnly, setMissingOnly] = useState(isMissingFromUrl);
+
+  useEffect(() => {
+    if (isMissingFromUrl && !missingOnly) {
+      setMissingOnly(true);
+    }
+  }, [isMissingFromUrl]);
 
   // Modals & form state
   const [modalOpen, setModalOpen] = useState(false);
@@ -94,11 +102,13 @@ export default function AttendancePage() {
       if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       if (statusFilter && statusFilter !== 'missing_checkout') q.set('status', statusFilter);
       if (isMissingActive) q.set('missing_checkout', 'true');
+      if (searchFilter) q.set('search', searchFilter);
       const qs = q.toString();
       return api.get(`/attendance${qs ? '?' + qs : ''}`);
     },
-    [effectiveEmpId, statusFilter, isMissingActive]
+    [effectiveEmpId, statusFilter, isMissingActive, searchFilter]
   );
+
   const attendanceList = Array.isArray(attendanceRes) ? attendanceRes : (attendanceRes?.data || []);
 
   // Total missing count across scope from dedicated endpoint
@@ -566,6 +576,21 @@ export default function AttendancePage() {
       <div style={{ height: 12 }} />
 
       <Card className="card" title="Filter Records">
+        <div style={{ marginBottom: 14 }}>
+          <SearchInput
+            placeholder="Search attendance by employee name..."
+            value={searchFilter}
+            onChange={(val) => {
+              const current = searchParams.get('search') || '';
+              if ((val || '') === current) return;
+              const next = new URLSearchParams(searchParams);
+              if (val) next.set('search', val);
+              else next.delete('search');
+              setSearchParams(next);
+            }}
+          />
+        </div>
+
         <div className={!isSelfOnly ? "grid grid-2" : "grid"}>
           {!isSelfOnly && (
             <div className="field">
@@ -653,7 +678,7 @@ export default function AttendancePage() {
             </button>
           )}
 
-          {(employeeIdFilter || statusFilter || missingOnly) && (
+          {(employeeIdFilter || statusFilter || missingOnly || searchFilter) && (
             <button
               className="btn btn-sm"
               style={{ marginLeft: 'auto' }}
@@ -667,6 +692,7 @@ export default function AttendancePage() {
           )}
         </div>
       </Card>
+
 
       <div style={{ height: 20 }} />
 

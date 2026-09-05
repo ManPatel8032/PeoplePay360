@@ -196,7 +196,7 @@ export default function EmployeeDetailView({ employeeId, initialEmployee, onClos
       </div>
 
       {/* Active Contract Alert */}
-      {summary?.active_contract && (
+      {summary?.active_contract ? (
         <div className="card" style={{ background: 'var(--accent-soft)', borderColor: 'var(--accent)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div>
@@ -214,6 +214,27 @@ export default function EmployeeDetailView({ employeeId, initialEmployee, onClos
               </div>
               <div className="meta">Monthly Wage</div>
             </div>
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ background: 'var(--surface-2)', border: '1px dashed var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 600, color: 'var(--text-muted)' }}>
+                No Active Contract
+              </div>
+              <div className="meta" style={{ marginTop: 2 }}>
+                This employee has no running contract. A contract is required for payroll computation.
+              </div>
+            </div>
+            {canReadContracts && (
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => navigate(`/contracts?employee_id=${employee.id}`)}
+              >
+                + Create Contract
+              </button>
+            )}
           </div>
         </div>
       )}

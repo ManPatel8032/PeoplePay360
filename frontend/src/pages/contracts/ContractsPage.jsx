@@ -2,7 +2,10 @@ import { useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api, money } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn, SearchInput } from '../../components/ui.jsx';
+
+
+
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -25,6 +28,9 @@ export default function ContractsPage() {
   const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const stateFilter = searchParams.get('state') || '';
   const structureFilter = searchParams.get('structure_id') || '';
+  const searchFilter = searchParams.get('search') || '';
+  const isMissingFilter = searchParams.get('missing') === 'true';
+  const isExpiringFilter = searchParams.get('expiring') === 'true';
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingContract, setEditingContract] = useState(null);
@@ -46,11 +52,13 @@ export default function ContractsPage() {
       if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       if (stateFilter) q.set('state', stateFilter);
       if (structureFilter) q.set('structure_id', structureFilter);
+      if (searchFilter) q.set('search', searchFilter);
       const qs = q.toString();
       return api.get(`/contracts${qs ? '?' + qs : ''}`);
     },
-    [effectiveEmpId, stateFilter, structureFilter]
+    [effectiveEmpId, stateFilter, structureFilter, searchFilter]
   );
+
 
   // Available structures for filtering & contract modal: from reference endpoint or derived from contracts
   const structureOptions = useMemo(() => {
@@ -66,6 +74,23 @@ export default function ContractsPage() {
     }
     return [];
   }, [structures.data, contracts]);
+
+  const missingContractEmployees = useMemo(() => {
+    const empList = Array.isArray(employees.data) ? employees.data : employees.data?.data || [];
+    if (!empList.length || !contracts) return [];
+    const empWithRunning = new Set(
+      contracts.filter((c) => c.state === 'running').map((c) => Number(c.employee_id))
+    );
+    return empList.filter((e) => e.status === 'active' && !empWithRunning.has(Number(e.id)));
+  }, [employees.data, contracts]);
+
+  const displayedContracts = useMemo(() => {
+    if (!contracts) return [];
+    if (isExpiringFilter) {
+      return contracts.filter((c) => c.state === 'running' && c.end_date);
+    }
+    return contracts;
+  }, [contracts, isExpiringFilter]);
 
   // Form state
   const [form, setForm] = useState({
@@ -328,7 +353,100 @@ export default function ContractsPage() {
         </div>
       </div>
 
+      {isMissingFilter && (
+        <div style={{ marginBottom: 16 }}>
+          <Alert level="error">
+            <div style={{ width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ fontWeight: 600 }}>
+                  Active employee(s) without a running contract ({missingContractEmployees.length}):
+                </span>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete('missing');
+                    setSearchParams(next);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </div>
+              <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {missingContractEmployees.length === 0 ? (
+                  <span className="muted" style={{ fontSize: 13 }}>All active employees currently have running contracts.</span>
+                ) : (
+                  missingContractEmployees.map((emp) => (
+                    <button
+                      key={emp.id}
+                      className="btn btn-sm btn-primary"
+                      onClick={() => {
+                        setEditingContract(null);
+                        setForm({
+                          employee_id: String(emp.id),
+                          name: `Employment Contract - ${emp.name}`,
+                          start_date: TODAY,
+                          end_date: '',
+                          department_id: emp.department_id ? String(emp.department_id) : '',
+                          job_position_id: emp.job_position_id ? String(emp.job_position_id) : '',
+                          schedule_id: emp.schedule_id ? String(emp.schedule_id) : '',
+                          wage: '',
+                          structure_id: '',
+                          state: 'draft',
+                        });
+                        setFormError(null);
+                        setOverlapWarning(null);
+                        setModalOpen(true);
+                      }}
+                    >
+                      + Create Contract for {emp.name} ({emp.employee_number || emp.id})
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </Alert>
+        </div>
+      )}
+
+      {isExpiringFilter && (
+        <div style={{ marginBottom: 16 }}>
+          <Alert level="warning">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 12 }}>
+              <span>
+                Filtered by: <strong>Contracts expiring in this period</strong> ({displayedContracts.length} found)
+              </span>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete('expiring');
+                  setSearchParams(next);
+                }}
+              >
+                Clear Filter
+              </button>
+            </div>
+          </Alert>
+        </div>
+      )}
+
       <Card className="card" title="Filter Contracts">
+        <div style={{ marginBottom: 14 }}>
+          <SearchInput
+            placeholder="Search contracts by contract name or employee..."
+            value={searchFilter}
+            onChange={(val) => {
+              const current = searchParams.get('search') || '';
+              if ((val || '') === current) return;
+              const next = new URLSearchParams(searchParams);
+              if (val) next.set('search', val);
+              else next.delete('search');
+              setSearchParams(next);
+            }}
+          />
+        </div>
+
         <div className={!isEmployee ? "grid grid-3" : "grid grid-2"}>
           {!isEmployee && (
             <div className="field">
@@ -395,7 +513,7 @@ export default function ContractsPage() {
           </div>
         </div>
 
-        {(employeeIdFilter || stateFilter || structureFilter) && (
+        {(employeeIdFilter || stateFilter || structureFilter || searchFilter) && (
           <div style={{ marginTop: 12 }}>
             <button
               className="btn btn-sm"
@@ -409,11 +527,12 @@ export default function ContractsPage() {
         )}
       </Card>
 
+
       <div style={{ height: 20 }} />
 
       <States loading={loading} error={error} empty={!contracts?.length} onRetry={reload}>
         <Card pad={false}>
-          <Table columns={columns} rows={contracts || []} onRowClick={openEditModal} />
+          <Table columns={columns} rows={displayedContracts || []} onRowClick={openEditModal} />
         </Card>
       </States>
 
@@ -503,8 +622,8 @@ export default function ContractsPage() {
                 <input
                   className="input"
                   type="number"
-                  min="1"
-                  step="100"
+                  min="0"
+                  step="any"
                   placeholder="e.g. 50000"
                   value={form.wage}
                   onChange={(e) => handleFieldChange('wage', e.target.value)}

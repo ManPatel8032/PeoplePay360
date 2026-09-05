@@ -23,6 +23,27 @@ const endOfThisMonth = () => {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
 };
 
+/** Normalizes alert links to ensure proper query parameters and prevent 404s. */
+function resolveAlertLink(a) {
+  if (!a?.link) return null;
+  if (a.link === '/payruns') return '/payroll?tab=payslips&state=draft';
+  if (a.link === '/payslips') return '/payroll?tab=payslips';
+  if (a.link === '/time-off/requests') return '/time-off?tab=requests&state=to_approve';
+  if (a.link === '/attendance' && a.message?.toLowerCase().includes('check-out')) {
+    return '/attendance?missing_checkout=true';
+  }
+  if (a.link === '/employees' && a.message?.toLowerCase().includes('bank')) {
+    return '/employees?missing_bank=true';
+  }
+  if (a.link === '/contracts' && a.message?.toLowerCase().includes('without a contract')) {
+    return '/contracts?missing=true';
+  }
+  if (a.link === '/contracts' && a.message?.toLowerCase().includes('expiring')) {
+    return '/contracts?expiring=true';
+  }
+  return a.link;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState({
@@ -138,15 +159,37 @@ export default function Dashboard() {
                 {data.alerts.length === 0
                   ? <div className="state"><h3>All clear</h3><p className="muted">No payroll issues for these filters.</p></div>
                   : <div style={{ display: 'grid', gap: 8 }}>
-                      {data.alerts.map((a, i) => (
-                        <div key={i} onClick={() => a.link && navigate(a.link)}
-                             style={{ cursor: a.link ? 'pointer' : 'default' }}>
-                          <Alert level={a.level}>
-                            <span>{a.message}</span>
-                            {a.link && <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>→ View</span>}
-                          </Alert>
-                        </div>
-                      ))}
+                      {data.alerts.map((a, i) => {
+                        const targetLink = resolveAlertLink(a);
+                        return (
+                          <div
+                            key={i}
+                            role={targetLink ? 'button' : undefined}
+                            tabIndex={targetLink ? 0 : undefined}
+                            onClick={() => targetLink && navigate(targetLink)}
+                            onKeyDown={(e) => {
+                              if (targetLink && (e.key === 'Enter' || e.key === ' ')) {
+                                e.preventDefault();
+                                navigate(targetLink);
+                              }
+                            }}
+                            className={targetLink ? 'dashboard-alert-clickable' : ''}
+                            style={{
+                              cursor: targetLink ? 'pointer' : 'default',
+                              outline: 'none',
+                            }}
+                          >
+                            <Alert level={a.level}>
+                              <span>{a.message}</span>
+                              {targetLink && (
+                                <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, opacity: 0.85, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  → View
+                                </span>
+                              )}
+                            </Alert>
+                          </div>
+                        );
+                      })}
                     </div>}
               </Card>
 
