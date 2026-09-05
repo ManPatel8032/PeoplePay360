@@ -3,6 +3,7 @@ dist/
 build/
 .env
 .env.local
+cookies.txt
 *.db
 *.db-shm
 *.db-wal
