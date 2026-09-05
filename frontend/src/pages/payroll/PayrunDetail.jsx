@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { api, money, moneyExact } from '../../api.js';
 import { useApi, States, Card, Table, Badge, Alert, empNumberColumn } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import PayslipDetail from './PayslipDetail.jsx';
 
 const ACTIONS = {
@@ -61,6 +62,8 @@ export default function PayrunDetail({ payrunId, onBack }) {
   }
 
   const actionDef = run ? ACTIONS[run.state] : null;
+  const { can } = useAuth();
+  const canRunPayroll = can('payruns', 'write') !== 'none';
   const isPaidOrValidated = run && ['validated', 'paid'].includes(run.state);
   const canSend = run && ['validated', 'paid'].includes(run.state);
 
@@ -159,7 +162,7 @@ export default function PayrunDetail({ payrunId, onBack }) {
               </Alert>
             )}
             <div className="row" style={{ marginTop: 8, gap: 12 }}>
-              {actionDef && (
+              {actionDef && canRunPayroll && (
                 <div>
                   <button className="btn btn-primary" onClick={() => doAction(actionDef.action)}
                           disabled={!!acting || (actionDef.action === 'validate' && errorWarnings.length > 0)}>
@@ -173,7 +176,7 @@ export default function PayrunDetail({ payrunId, onBack }) {
                   )}
                 </div>
               )}
-              {canSend && (
+              {canSend && canRunPayroll && (
                 <div>
                   <button className="btn" onClick={sendPayslips} disabled={!!acting}>
                     {acting === 'send' ? 'Sending…' : '📧 Send Payslips'}

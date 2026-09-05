@@ -2,9 +2,46 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MATRIX } from '../src/auth.js';
 
-test('attendance permissions: all roles have read/write access to attendance module base', () => {
-  assert.equal(MATRIX.attendance.read, 'employee');
-  assert.equal(MATRIX.attendance.write, 'employee');
+/*
+ * The matrix is now module -> role -> { read, write, delete }, with explicit
+ * 'all' | 'own' | 'none' scopes. It used to store a single minimum role per
+ * module, which could not express the problem statement (Employee sees their
+ * own payslip, HR Manager sees none, Payroll User sees all).
+ */
+test('attendance permissions match the problem statement', () => {
+  assert.equal(MATRIX.attendance.employee.read, 'own');
+  assert.equal(MATRIX.attendance.employee.write, 'own');
+  assert.equal(MATRIX.attendance.hr_manager.read, 'all');
+  assert.equal(MATRIX.attendance.hr_manager.write, 'all');
+  assert.equal(MATRIX.attendance.payroll_user.read, 'all');
+  assert.equal(MATRIX.attendance.admin.write, 'all');
+});
+
+test('payslips: HR Manager is shut out, Employee sees only their own', () => {
+  assert.equal(MATRIX.payslips.employee.read, 'own');
+  assert.equal(MATRIX.payslips.employee.write, 'none');
+  assert.equal(MATRIX.payslips.hr_manager.read, 'none');
+  assert.equal(MATRIX.payslips.payroll_user.read, 'all');
+});
+
+test('payroll user gets create/read/update but not delete', () => {
+  assert.equal(MATRIX.payruns.payroll_user.write, 'all');
+  assert.equal(MATRIX.payruns.payroll_user.delete, 'none');
+  assert.equal(MATRIX.payruns.payroll_manager.delete, 'all');
+});
+
+test('salary structures and rules are read-only for payroll user', () => {
+  assert.equal(MATRIX.structures.payroll_user.read, 'all');
+  assert.equal(MATRIX.structures.payroll_user.write, 'none');
+  assert.equal(MATRIX.rules.payroll_manager.write, 'all');
+});
+
+test('only admin administers users', () => {
+  for (const role of ['employee', 'hr_manager', 'payroll_user', 'payroll_manager']) {
+    assert.equal(MATRIX.users[role].read, 'none', `${role} must not read users`);
+    assert.equal(MATRIX.users[role].write, 'none', `${role} must not write users`);
+  }
+  assert.equal(MATRIX.users.admin.write, 'all');
 });
 
 test('attendance role checks: role definitions and hierarchy', () => {

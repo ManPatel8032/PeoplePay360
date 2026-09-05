@@ -9,7 +9,8 @@
  *  2. The pay of payroll staff (the people who run payroll) may only be set by
  *     an Admin, so nobody can influence their own or a colleague's salary.
  */
-import { one, query } from '../db.js';
+import { one } from '../db.js';
+import { scope } from '../auth.js';
 
 /** Roles whose holders are considered payroll staff for rule 2. */
 export const PAYROLL_ROLES = ['payroll_user', 'payroll_manager'];
@@ -17,36 +18,29 @@ export const PAYROLL_ROLES = ['payroll_user', 'payroll_manager'];
 export const isAdmin = (req) => req.user?.role === 'admin';
 
 /**
- * Which employee records may this caller see?
+ * Which employee records may this caller see, for a given module?
  *
- *   { scope: 'all' }                    admin, hr_manager, payroll_*
- *   { scope: 'team', ids: [...] }       anyone with direct reports — their own
- *                                       record plus their whole subtree, so a
- *                                       department head still sees the people
- *                                       under their team leads
- *   { scope: 'self', ids: [ownId] }     an individual contributor
- *   { scope: 'none', ids: [] }          a login with no employee record
+ *   { scope: 'all' }                 sees every record
+ *   { scope: 'self', ids: [ownId] }  sees only their own
+ *   { scope: 'none', ids: [] }       sees nothing
  *
- * Managers are identified by the org chart, not by role: an `employee` who
- * happens to manage a team gets team scope.
+ * Visibility comes from the ROLE in `auth.js`, never from the org chart.
+ * Leading a team is a position, not a permission: the PS gives Employee
+ * "view own employee details ... no HR administration access", so a manager
+ * on the employee role still sees only themselves.
  */
-export async function visibleEmployees(req) {
-  const role = req.user?.role;
+export function visibleEmployees(req, module = 'employees') {
+  const allowed = scope(req, module, 'read');
+  if (allowed === 'all') return { scope: 'all', ids: null };
+
   const selfId = req.user?.employee_id ?? null;
-
-  if (role === 'admin' || role === 'hr_manager' || PAYROLL_ROLES.includes(role)) {
-    return { scope: 'all', ids: null };
-  }
-  if (!selfId) return { scope: 'none', ids: [] };
-
-  const rows = await query('SELECT id FROM employee_subtree($1)', [selfId]);
-  const ids = rows.map((r) => r.id);
-  return { scope: ids.length > 1 ? 'team' : 'self', ids };
+  if (allowed === 'none' || !selfId) return { scope: 'none', ids: [] };
+  return { scope: 'self', ids: [selfId] };
 }
 
 /** True when the caller may see this particular employee's records. */
-export async function canSeeEmployee(req, employeeId) {
-  const v = await visibleEmployees(req);
+export function canSeeEmployee(req, employeeId, module = 'employees') {
+  const v = visibleEmployees(req, module);
   if (v.scope === 'all') return true;
   return v.ids.includes(Number(employeeId));
 }
@@ -55,8 +49,8 @@ export async function canSeeEmployee(req, employeeId) {
  * SQL fragment restricting a query to the visible employees.
  * Returns null when no restriction is needed.
  */
-export async function employeeScopeFilter(req, column, params) {
-  const v = await visibleEmployees(req);
+export function employeeScopeFilter(req, column, params, module = 'employees') {
+  const v = visibleEmployees(req, module);
   if (v.scope === 'all') return null;
   if (!v.ids.length) return `${column} IS NULL`; // matches nothing
   params.push(v.ids);

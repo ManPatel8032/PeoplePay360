@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { api, moneyExact } from '../../api.js';
 import { useApi, States, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
+import { useAuth } from '../../auth/AuthContext.jsx';
 
 const CATEGORIES = ['BASIC', 'ALW', 'GROSS', 'DED', 'NET'];
 const COMPUTE_TYPES = ['fixed', 'percent', 'formula'];
@@ -14,6 +15,10 @@ const emptyRule = {
 };
 
 export default function SalaryRules({ structureId, structureName, onBack }) {
+  // Payroll User has read-only access to rules; only Payroll Manager and Admin edit.
+  const { can } = useAuth();
+  const canEditRules = can('rules', 'write') !== 'none';
+
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyRule);
   const [saving, setSaving] = useState(false);
@@ -99,12 +104,12 @@ export default function SalaryRules({ structureId, structureName, onBack }) {
       </span>
     )},
     { key: 'active', label: 'Active', render: (r) => <Badge value={r.active ? 'active' : 'inactive'} /> },
-    { key: 'actions', label: '', render: (r) => (
+    { key: 'actions', label: '', render: (r) => (canEditRules ? (
       <div className="row">
         <button className="btn btn-sm" onClick={(e) => { e.stopPropagation(); open(r); }}>Edit</button>
         <button className="btn btn-sm btn-danger" onClick={(e) => { e.stopPropagation(); remove(r.id); }}>Delete</button>
       </div>
-    )},
+    ) : <span className="meta">read-only</span>)},
   ];
 
   return (
@@ -115,7 +120,7 @@ export default function SalaryRules({ structureId, structureName, onBack }) {
           <h2>Rules — {structureName}</h2>
           <p className="meta">Define and sequence salary computation rules. Rules execute top-to-bottom by sequence number.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => open(null)}>+ New Rule</button>
+        {canEditRules && <button className="btn btn-primary" onClick={() => open(null)}>+ New Rule</button>}
       </div>
 
       <States loading={loading} error={loadErr} empty={!rules?.length}

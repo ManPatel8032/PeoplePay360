@@ -4,7 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 
 import { migrate, waitForDb, query } from './db.js';
-import { attachUser, MATRIX } from './auth.js';
+import { attachUser, permissionsFor } from './auth.js';
 import { ah } from './lib/crud.js';
 import authRouter from './routes/auth.js';
 import usersRouter from './routes/users.js';
@@ -33,7 +33,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
 
 // Backward-compatible me endpoint for demo role switcher
-app.get('/api/me', (req, res) => res.json({ data: { user: req.user, permissions: MATRIX } }));
+app.get('/api/me', (req, res) => res.json({ data: { user: req.user, permissions: permissionsFor(req.user?.role) } }));
 
 // HR
 app.use('/api/employees', employees);

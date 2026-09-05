@@ -1,7 +1,7 @@
 /** Contracts (A2). Owner: Track A / Section 2. */
 import { Router } from 'express';
 import { query, one } from '../db.js';
-import { can, scopeToSelf } from '../auth.js';
+import { can } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import { blockPayrollStaffPay, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
