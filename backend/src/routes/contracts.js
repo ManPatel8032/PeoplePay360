@@ -36,6 +36,7 @@ contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
   const selfId = scopeToSelf(req);
   const employeeId = selfId || req.query.employee_id;
   const state = req.query.state;
+  const structureId = req.query.structure_id;
   const search = req.query.search;
 
   const where = [];
@@ -49,6 +50,10 @@ contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
     params.push(state);
     where.push(`c.state = $${params.length}`);
   }
+  if (structureId) {
+    params.push(structureId);
+    where.push(`c.structure_id = $${params.length}`);
+  }
   if (search) {
     params.push(`%${search}%`);
     where.push(`(c.name ILIKE $${params.length} OR e.name ILIKE $${params.length})`);
@@ -57,6 +62,12 @@ contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
   const sql = `${CONTRACT_SQL}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY c.start_date DESC`;
   const rows = await query(sql, params);
   res.json({ data: rows, meta: { total: rows.length } });
+}));
+
+// Salary structures lookup for contracts
+contracts.get('/structures', can('contracts', 'read'), ah(async (_req, res) => {
+  const rows = await query('SELECT id, name, code FROM salary_structures WHERE active = TRUE ORDER BY name');
+  res.json({ data: rows });
 }));
 
 // Pre-save overlap check endpoint (works for both new and existing contracts)

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
 
 function formatDateTime(isoStr) {
@@ -26,11 +27,15 @@ function formatTimeOnly(isoStr) {
 }
 
 export default function AttendancePage() {
+  const { user, can } = useAuth();
+  const isEmployee = user?.role === 'employee';
+  const canManageAll = can('attendance', 'write') === 'all';
+
   const [searchParams, setSearchParams] = useSearchParams();
   const employeeIdFilter = searchParams.get('employee_id') || '';
+  const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const statusFilter = searchParams.get('status') || '';
   const [missingOnly, setMissingOnly] = useState(false);
-  const [search, setSearch] = useState('');
 
   // Modals & form state
   const [modalOpen, setModalOpen] = useState(false);
@@ -52,14 +57,13 @@ export default function AttendancePage() {
   const { data: attendanceList, loading, error, reload } = useApi(
     () => {
       const q = new URLSearchParams();
-      if (employeeIdFilter) q.set('employee_id', employeeIdFilter);
+      if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       if (statusFilter) q.set('status', statusFilter);
       if (missingOnly) q.set('missing_checkout', 'true');
-      if (search) q.set('search', search);
       const qs = q.toString();
       return api.get(`/attendance${qs ? '?' + qs : ''}`);
     },
-    [employeeIdFilter, statusFilter, missingOnly, search]
+    [effectiveEmpId, statusFilter, missingOnly]
   );
 
   // Form fields
@@ -107,7 +111,7 @@ export default function AttendancePage() {
     setEditingRow(null);
     const nowIso = new Date().toISOString().slice(0, 16);
     setForm({
-      employee_id: employeeIdFilter || '',
+      employee_id: isEmployee && user?.employee_id ? String(user.employee_id) : (employeeIdFilter || ''),
       check_in: nowIso,
       check_out: '',
       status: 'present',
@@ -326,27 +330,29 @@ export default function AttendancePage() {
       <div style={{ height: 12 }} />
 
       <Card className="card" title="Filter Records">
-        <div className="grid grid-3">
-          <div className="field">
-            <label>Employee</label>
-            <select
-              className="select"
-              value={employeeIdFilter}
-              onChange={(e) => {
-                const next = new URLSearchParams(searchParams);
-                if (e.target.value) next.set('employee_id', e.target.value);
-                else next.delete('employee_id');
-                setSearchParams(next);
-              }}
-            >
-              <option value="">All Employees</option>
-              {(employees.data || []).map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className={!isEmployee ? "grid grid-2" : "grid"}>
+          {!isEmployee && (
+            <div className="field">
+              <label>Employee</label>
+              <select
+                className="select"
+                value={employeeIdFilter}
+                onChange={(e) => {
+                  const next = new URLSearchParams(searchParams);
+                  if (e.target.value) next.set('employee_id', e.target.value);
+                  else next.delete('employee_id');
+                  setSearchParams(next);
+                }}
+              >
+                <option value="">All Employees</option>
+                {(employees.data || []).map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="field">
             <label>Status</label>
@@ -368,17 +374,6 @@ export default function AttendancePage() {
               <option value="absent">Absent</option>
             </select>
           </div>
-
-          <div className="field">
-            <label>Search</label>
-            <input
-              className="input"
-              type="text"
-              placeholder="Search employee..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
         </div>
 
         <div className="row" style={{ marginTop: 12 }}>
@@ -391,13 +386,12 @@ export default function AttendancePage() {
             <span>Show Missing Check-outs Only ({missingCheckoutCount})</span>
           </label>
 
-          {(employeeIdFilter || statusFilter || search || missingOnly) && (
+          {(employeeIdFilter || statusFilter || missingOnly) && (
             <button
               className="btn btn-sm"
               style={{ marginLeft: 'auto' }}
               onClick={() => {
                 setSearchParams({});
-                setSearch('');
                 setMissingOnly(false);
               }}
             >
@@ -432,12 +426,13 @@ export default function AttendancePage() {
               </Alert>
             )}
 
+            <fieldset disabled={isEmployee && Boolean(editingRow)} style={{ border: 'none', padding: 0, margin: 0, display: 'grid', gap: 16 }}>
             <Field label="Employee *">
               <select
                 className="select"
                 value={form.employee_id}
                 onChange={(e) => setForm({ ...form, employee_id: e.target.value })}
-                disabled={Boolean(editingRow)}
+                disabled={Boolean(editingRow) || isEmployee}
                 required
               >
                 <option value="">Select Employee...</option>
@@ -494,13 +489,17 @@ export default function AttendancePage() {
               />
             </Field>
 
+            </fieldset>
+
             <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
               <button type="button" className="btn" onClick={() => setModalOpen(false)}>
-                Cancel
+                {isEmployee && editingRow ? 'Close' : 'Cancel'}
               </button>
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? 'Saving...' : editingRow ? 'Save Correction' : 'Log Entry'}
-              </button>
+              {(!isEmployee || !editingRow) && (
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? 'Saving...' : editingRow ? 'Save Correction' : 'Log Entry'}
+                </button>
+              )}
             </div>
           </form>
         </Modal>

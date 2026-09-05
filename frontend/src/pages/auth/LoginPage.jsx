@@ -39,7 +39,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const user = await login(email.trim(), password);
-      setDone('/dashboard');
+      setDone('/');
     } catch (err) {
       setError({ message: err.message, hint: hintFor(err.status) });
       setPassword('');

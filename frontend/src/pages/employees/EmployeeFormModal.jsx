@@ -1,0 +1,281 @@
+import { useState, useEffect } from 'react';
+import { api } from '../../api.js';
+import { Modal, Field, Alert } from '../../components/ui.jsx';
+
+export default function EmployeeFormModal({ employee, onClose, onSaved }) {
+  const isEditing = Boolean(employee?.id);
+
+  const [departments, setDepartments] = useState([]);
+  const [positions, setPositions] = useState([]);
+  const [schedules, setSchedules] = useState([]);
+  const [allEmployees, setAllEmployees] = useState([]);
+
+  const [form, setForm] = useState({
+    name: employee?.name || '',
+    work_email: employee?.work_email || '',
+    phone: employee?.phone || '',
+    department_id: employee?.department_id ? String(employee.department_id) : '',
+    job_position_id: employee?.job_position_id ? String(employee.job_position_id) : '',
+    manager_id: employee?.manager_id ? String(employee.manager_id) : '',
+    schedule_id: employee?.schedule_id ? String(employee.schedule_id) : '',
+    employee_type: employee?.employee_type || 'full_time',
+    status: employee?.status || 'active',
+    bank_account: employee?.bank_account || '',
+    join_date: employee?.join_date ? employee.join_date.slice(0, 10) : new Date().toISOString().slice(0, 10),
+  });
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      api.get('/departments').catch(() => []),
+      api.get('/positions').catch(() => []),
+      api.get('/schedules').catch(() => []),
+      api.get('/employees').catch(() => []),
+    ]).then(([deps, pos, scheds, emps]) => {
+      if (!alive) return;
+      setDepartments(Array.isArray(deps) ? deps : deps?.data || []);
+      setPositions(Array.isArray(pos) ? pos : pos?.data || []);
+      setSchedules(Array.isArray(scheds) ? scheds : scheds?.data || []);
+      setAllEmployees(Array.isArray(emps) ? emps : emps?.data || []);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const filteredPositions = positions.filter((p) => {
+    if (!form.department_id) return true;
+    return String(p.department_id) === String(form.department_id);
+  });
+
+  const availableManagers = allEmployees.filter((e) => {
+    if (isEditing && e.id === employee.id) return false;
+    return true;
+  });
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    setFieldErrors((prev) => ({ ...prev, [name]: null }));
+    setError(null);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name.trim()) {
+      setFieldErrors((prev) => ({ ...prev, name: 'Employee name is required' }));
+      return;
+    }
+    if (!form.work_email.trim()) {
+      setFieldErrors((prev) => ({ ...prev, work_email: 'Work email is required' }));
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setFieldErrors({});
+
+    const payload = {
+      name: form.name.trim(),
+      work_email: form.work_email.trim(),
+      phone: form.phone.trim() || null,
+      department_id: form.department_id ? Number(form.department_id) : null,
+      job_position_id: form.job_position_id ? Number(form.job_position_id) : null,
+      manager_id: form.manager_id ? Number(form.manager_id) : null,
+      schedule_id: form.schedule_id ? Number(form.schedule_id) : null,
+      employee_type: form.employee_type,
+      status: form.status,
+      bank_account: form.bank_account.trim() || null,
+      join_date: form.join_date || new Date().toISOString().slice(0, 10),
+    };
+
+    try {
+      if (isEditing) {
+        await api.patch(`/employees/${employee.id}`, payload);
+      } else {
+        await api.post('/employees', payload);
+      }
+      onSaved?.();
+    } catch (err) {
+      setError(err.message || 'Failed to save employee');
+      if (err.fields) {
+        setFieldErrors(err.fields);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={isEditing ? `Edit ${employee.name}` : 'New Employee'}
+      onClose={onClose}
+      width={640}
+    >
+      {error && (
+        <Alert level="error" style={{ marginBottom: 16 }}>
+          {error}
+        </Alert>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        <div className="grid grid-2">
+          <Field label="Full Name *" error={fieldErrors.name}>
+            <input
+              type="text"
+              name="name"
+              className="input"
+              value={form.name}
+              onChange={handleChange}
+              placeholder="e.g. Aarav Mehta"
+              required
+            />
+          </Field>
+
+          <Field label="Work Email *" error={fieldErrors.work_email}>
+            <input
+              type="email"
+              name="work_email"
+              className="input"
+              value={form.work_email}
+              onChange={handleChange}
+              placeholder="e.g. aarav@peoplepay360.com"
+              required
+            />
+          </Field>
+
+          <Field label="Phone Number" error={fieldErrors.phone}>
+            <input
+              type="tel"
+              name="phone"
+              className="input"
+              value={form.phone}
+              onChange={handleChange}
+              placeholder="+91 9876543210"
+            />
+          </Field>
+
+          <Field label="Department">
+            <select
+              name="department_id"
+              className="select"
+              value={form.department_id}
+              onChange={handleChange}
+            >
+              <option value="">— Select Department —</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Job Position">
+            <select
+              name="job_position_id"
+              className="select"
+              value={form.job_position_id}
+              onChange={handleChange}
+            >
+              <option value="">— Select Position —</option>
+              {filteredPositions.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Manager">
+            <select
+              name="manager_id"
+              className="select"
+              value={form.manager_id}
+              onChange={handleChange}
+            >
+              <option value="">— None (Top Level) —</option>
+              {availableManagers.map((m) => (
+                <option key={m.id} value={m.id}>{m.name} ({m.department_name || 'No Dept'})</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Working Schedule">
+            <select
+              name="schedule_id"
+              className="select"
+              value={form.schedule_id}
+              onChange={handleChange}
+            >
+              <option value="">— Select Schedule —</option>
+              {schedules.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Employee Type">
+            <select
+              name="employee_type"
+              className="select"
+              value={form.employee_type}
+              onChange={handleChange}
+            >
+              <option value="full_time">Full Time</option>
+              <option value="part_time">Part Time</option>
+              <option value="contract">Contract</option>
+              <option value="intern">Intern</option>
+            </select>
+          </Field>
+
+          <Field label="Status">
+            <select
+              name="status"
+              className="select"
+              value={form.status}
+              onChange={handleChange}
+            >
+              <option value="active">Active</option>
+              <option value="on_leave">On Leave</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </Field>
+
+          <Field label="Join Date">
+            <input
+              type="date"
+              name="join_date"
+              className="input"
+              value={form.join_date}
+              onChange={handleChange}
+            />
+          </Field>
+
+          <div style={{ gridColumn: 'span 2' }}>
+            <Field label="Bank Account">
+              <input
+                type="text"
+                name="bank_account"
+                className="input"
+                value={form.bank_account}
+                onChange={handleChange}
+                placeholder="e.g. HDFC0001-8827341"
+              />
+              <span className="meta" style={{ marginTop: 2 }}>
+                Used for payroll disbursement. Missing account generates a payroll warning.
+              </span>
+            </Field>
+          </div>
+        </div>
+
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20 }}>
+          <button type="button" className="btn" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            {saving ? 'Saving...' : isEditing ? 'Update Employee' : 'Create Employee'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

@@ -1,15 +1,23 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
+import { useAuth } from '../../auth/AuthContext.jsx';
 import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
 import LeaveBalanceWidget from '../../components/LeaveBalanceWidget.jsx';
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
 export default function TimeOffPage() {
+  const { user, can } = useAuth();
+  const isEmployee = user?.role === 'employee';
+  const canApprove = can('timeoff_approve', 'write') !== 'none';
+  const canWriteAllocations = can('allocations', 'write') === 'all';
+  const canWriteTypes = can('timeoff', 'write') === 'all';
+
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'requests';
   const employeeIdFilter = searchParams.get('employee_id') || '';
+  const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
 
   const setTab = (tab) => {
     const next = new URLSearchParams(searchParams);
@@ -21,17 +29,21 @@ export default function TimeOffPage() {
   const employees = useApi(() => api.get('/employees'), []);
   const typesData = useApi(() => api.get('/time-off/types'), []);
 
-  // Selected employee for balance preview (defaults to filter or first employee)
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(employeeIdFilter || '');
-  const [balanceKey, setBalanceKey] = useState(0); // Trigger reload of balance widget
+  // Selected employee for balance preview
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState(
+    isEmployee && user?.employee_id ? String(user.employee_id) : (employeeIdFilter || '')
+  );
+  const [balanceKey, setBalanceKey] = useState(0);
 
   useEffect(() => {
-    if (employeeIdFilter) {
+    if (isEmployee && user?.employee_id) {
+      setSelectedEmployeeId(String(user.employee_id));
+    } else if (employeeIdFilter) {
       setSelectedEmployeeId(employeeIdFilter);
     } else if (employees.data?.length && !selectedEmployeeId) {
       setSelectedEmployeeId(String(employees.data[0].id));
     }
-  }, [employeeIdFilter, employees.data]);
+  }, [employeeIdFilter, employees.data, isEmployee, user?.employee_id]);
 
   // =================== REQUESTS TAB ===================
   const [requestFilterState, setRequestFilterState] = useState('all'); // 'all', 'to_approve', 'approved', 'refused'
@@ -42,14 +54,15 @@ export default function TimeOffPage() {
   const { data: requests, loading: reqLoading, error: reqError, reload: reloadRequests, setData: setRequestsData } = useApi(
     () => {
       const q = new URLSearchParams();
-      if (employeeIdFilter) q.set('employee_id', employeeIdFilter);
+      if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       if (requestFilterState === 'to_approve') q.set('state', 'to_approve');
       else if (requestFilterState === 'approved') q.set('state', 'approved');
       else if (requestFilterState === 'refused') q.set('state', 'refused');
+      else if (requestFilterState === 'cancelled') q.set('state', 'cancelled');
       const qs = q.toString();
       return api.get(`/time-off/requests${qs ? '?' + qs : ''}`);
     },
-    [employeeIdFilter, requestFilterState]
+    [effectiveEmpId, requestFilterState]
   );
 
   // New Request Form
@@ -82,7 +95,7 @@ export default function TimeOffPage() {
 
   const openNewRequestModal = () => {
     setReqForm({
-      employee_id: selectedEmployeeId || employeeIdFilter || (employees.data?.[0]?.id ? String(employees.data[0].id) : ''),
+      employee_id: isEmployee && user?.employee_id ? String(user.employee_id) : (selectedEmployeeId || effectiveEmpId || (employees.data?.[0]?.id ? String(employees.data[0].id) : '')),
       type_id: typesData.data?.[0]?.id ? String(typesData.data[0].id) : '',
       date_from: TODAY,
       date_to: TODAY,
@@ -152,6 +165,21 @@ export default function TimeOffPage() {
     }
   };
 
+  const handleCancelRequest = async (e, r) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to cancel this leave request?')) return;
+    try {
+      await api.post(`/time-off/requests/${r.id}/cancel`, {});
+      if (requests) {
+        setRequestsData(requests.map((item) => (item.id === r.id ? { ...item, state: 'cancelled' } : item)));
+      }
+      setBalanceKey((k) => k + 1);
+      reloadRequests();
+    } catch (err) {
+      alert(err.message || 'Cancellation failed');
+    }
+  };
+
   const pendingRequestsCount = useMemo(() => {
     return (requests || []).filter((r) => r.state === 'to_approve').length;
   }, [requests]);
@@ -206,7 +234,10 @@ export default function TimeOffPage() {
       label: 'Actions',
       align: 'right',
       render: (r) => {
-        if (r.state === 'to_approve') {
+        const isOwn = isEmployee || (user?.employee_id && r.employee_id === user.employee_id);
+        const canCancel = (r.state === 'to_approve' || r.state === 'approved') && (isOwn || canApprove);
+
+        if (r.state === 'to_approve' && canApprove) {
           return (
             <div className="row" style={{ justifyContent: 'flex-end', gap: 4 }}>
               <button
@@ -222,13 +253,49 @@ export default function TimeOffPage() {
               >
                 ✕ Refuse
               </button>
+              <button
+                className="btn btn-sm"
+                style={{ color: 'var(--danger)', borderColor: '#fca5a5', background: '#fef2f2' }}
+                onClick={(e) => handleCancelRequest(e, r)}
+                title="Cancel leave request"
+              >
+                Cancel
+              </button>
             </div>
           );
         }
-        return <span className="meta">{r.approver_name ? `By ${r.approver_name}` : '—'}</span>;
+
+        if (canCancel) {
+          return (
+            <div className="row" style={{ justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
+              <span className="meta">
+                {r.approver_name ? `By ${r.approver_name}` : r.state === 'to_approve' ? 'Pending Approval' : ''}
+              </span>
+              <button
+                className="btn btn-sm"
+                style={{
+                  color: 'var(--danger)',
+                  borderColor: '#fca5a5',
+                  background: '#fef2f2',
+                  padding: '3px 8px',
+                  fontWeight: 600,
+                }}
+                onClick={(e) => handleCancelRequest(e, r)}
+              >
+                ✕ Cancel Leave
+              </button>
+            </div>
+          );
+        }
+
+        return (
+          <span className="meta">
+            {r.approver_name ? `By ${r.approver_name}` : r.state === 'to_approve' ? 'Pending Approval' : r.state === 'cancelled' ? 'Cancelled' : '—'}
+          </span>
+        );
       },
     },
-  ], [requests]);
+  ], [requests, canApprove, isEmployee, user?.employee_id]);
 
 
   // =================== ALLOCATIONS TAB ===================
@@ -239,11 +306,11 @@ export default function TimeOffPage() {
   const { data: allocations, loading: allocLoading, error: allocError, reload: reloadAllocations, setData: setAllocationsData } = useApi(
     () => {
       const q = new URLSearchParams();
-      if (employeeIdFilter) q.set('employee_id', employeeIdFilter);
+      if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       const qs = q.toString();
       return api.get(`/time-off/allocations${qs ? '?' + qs : ''}`);
     },
-    [employeeIdFilter, activeTab]
+    [effectiveEmpId, activeTab]
   );
 
   const [allocForm, setAllocForm] = useState({
@@ -525,12 +592,12 @@ export default function TimeOffPage() {
               + Request Time Off
             </button>
           )}
-          {activeTab === 'allocations' && (
+          {activeTab === 'allocations' && canWriteAllocations && (
             <button className="btn btn-primary" onClick={openNewAllocModal}>
               + Allocate Leave Days
             </button>
           )}
-          {activeTab === 'types' && (
+          {activeTab === 'types' && canWriteTypes && (
             <button className="btn btn-primary" onClick={openCreateTypeModal}>
               + New Leave Type
             </button>
@@ -554,13 +621,15 @@ export default function TimeOffPage() {
         >
           Allocations
         </button>
-        <button
-          className={`btn ${activeTab === 'types' ? 'btn-primary' : ''}`}
-          style={{ borderRadius: '8px 8px 0 0', borderBottom: 0 }}
-          onClick={() => setTab('types')}
-        >
-          Leave Types Config
-        </button>
+        {!isEmployee && canWriteTypes && (
+          <button
+            className={`btn ${activeTab === 'types' ? 'btn-primary' : ''}`}
+            style={{ borderRadius: '8px 8px 0 0', borderBottom: 0 }}
+            onClick={() => setTab('types')}
+          >
+            Leave Types Config
+          </button>
+        )}
       </div>
 
       {/* Live Leave Balance Widget for Selected Employee */}
@@ -570,19 +639,21 @@ export default function TimeOffPage() {
             <h3 style={{ margin: 0 }}>Active Leave Balances</h3>
             <span className="meta">Approved allocations minus approved requests update live immediately</span>
           </div>
-          <div style={{ minWidth: 220 }}>
-            <select
-              className="select"
-              value={selectedEmployeeId}
-              onChange={(e) => setSelectedEmployeeId(e.target.value)}
-            >
-              {(employees.data || []).map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!isEmployee && (
+            <div style={{ minWidth: 220 }}>
+              <select
+                className="select"
+                value={selectedEmployeeId}
+                onChange={(e) => setSelectedEmployeeId(e.target.value)}
+              >
+                {(employees.data || []).map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         <LeaveBalanceWidget key={`${selectedEmployeeId}-${balanceKey}`} employeeId={selectedEmployeeId} />
       </Card>
@@ -597,12 +668,14 @@ export default function TimeOffPage() {
             >
               All Requests
             </button>
-            <button
-              className={`btn btn-sm ${requestFilterState === 'to_approve' ? 'btn-primary' : ''}`}
-              onClick={() => setRequestFilterState('to_approve')}
-            >
-              Needs My Approval ({pendingRequestsCount})
-            </button>
+            {!isEmployee && (
+              <button
+                className={`btn btn-sm ${requestFilterState === 'to_approve' ? 'btn-primary' : ''}`}
+                onClick={() => setRequestFilterState('to_approve')}
+              >
+                Needs My Approval ({pendingRequestsCount})
+              </button>
+            )}
             <button
               className={`btn btn-sm ${requestFilterState === 'approved' ? 'btn-primary' : ''}`}
               onClick={() => setRequestFilterState('approved')}
@@ -614,6 +687,12 @@ export default function TimeOffPage() {
               onClick={() => setRequestFilterState('refused')}
             >
               Refused
+            </button>
+            <button
+              className={`btn btn-sm ${requestFilterState === 'cancelled' ? 'btn-primary' : ''}`}
+              onClick={() => setRequestFilterState('cancelled')}
+            >
+              Cancelled
             </button>
           </div>
 
@@ -654,6 +733,7 @@ export default function TimeOffPage() {
                 className="select"
                 value={reqForm.employee_id}
                 onChange={(e) => handleReqFieldChange('employee_id', e.target.value)}
+                disabled={isEmployee}
                 required
               >
                 <option value="">Select Employee...</option>

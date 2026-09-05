@@ -352,6 +352,26 @@ requests.post('/:id/refuse', can('timeoff_approve', 'write'), ah(async (req, res
   res.json({ data: { ...full, balance } });
 }));
 
+requests.post('/:id/cancel', can('timeoff', 'write'), ah(async (req, res) => {
+  const r = await one(REQ_SQL + ' WHERE r.id = $1', [req.params.id]);
+  if (!r) return res.status(404).json({ error: 'Not found' });
+  if (r.state === 'cancelled') return res.status(400).json({ error: 'Request is already cancelled' });
+
+  const selfId = scopeToSelf(req);
+  if (selfId && r.employee_id !== selfId) {
+    return res.status(403).json({ error: 'Cannot cancel another employee\'s leave request' });
+  }
+
+  await one(
+    "UPDATE time_off_requests SET state='cancelled' WHERE id=$1 RETURNING id",
+    [r.id]
+  );
+
+  const full = await one(`${REQ_SQL} WHERE r.id = $1`, [r.id]);
+  const balance = await balanceFor(r.employee_id, r.type_id);
+  res.json({ data: { ...full, balance } });
+}));
+
 requests.delete('/:id', can('timeoff_approve', 'write'), ah(async (req, res) => {
   await query('DELETE FROM time_off_requests WHERE id = $1', [req.params.id]);
   res.status(204).end();

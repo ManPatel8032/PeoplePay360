@@ -9,6 +9,7 @@ import ChangePasswordPage from './pages/auth/ChangePasswordPage.jsx';
 
 import Dashboard from './pages/Dashboard.jsx';
 import Placeholder from './pages/Placeholder.jsx';
+import EmployeesPage from './pages/employees/EmployeesPage.jsx';
 import PayrollIndex from './pages/payroll/PayrollIndex.jsx';
 import ConfigIndex from './pages/config/ConfigIndex.jsx';
 import ContractsPage from './pages/contracts/ContractsPage.jsx';
@@ -124,6 +125,12 @@ function Shell({ children }) {
   );
 }
 
+/** Smart redirect to dashboard or employees depending on user permissions */
+function HomeRedirect() {
+  const { canRead } = useAuth();
+  return <Navigate to={canRead('dashboard') ? '/dashboard' : '/employees'} replace />;
+}
+
 /** Wraps a page in auth + role checks in one place. */
 const Guarded = ({ module, children }) => (
   <RequireAuth><RequireRole module={module}>{children}</RequireRole></RequireAuth>
@@ -133,7 +140,7 @@ function AppRoutes() {
   return (
     <Shell>
       <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<HomeRedirect />} />
 
         {/* Public */}
         <Route path="/login"  element={<RedirectIfAuthed><LoginPage /></RedirectIfAuthed>} />
@@ -144,7 +151,7 @@ function AppRoutes() {
 
         {/* Section 1 — Identity, Access & Employee Master */}
         <Route path="/users/*"     element={<Guarded module="users"><Placeholder title="User Administration" owner="Section 1" /></Guarded>} />
-        <Route path="/employees/*" element={<Guarded module="employees"><Placeholder title="Employees" owner="Section 1" /></Guarded>} />
+        <Route path="/employees/*" element={<Guarded module="employees"><EmployeesPage /></Guarded>} />
 
         {/* Section 2 — Contracts, Time & Attendance */}
         <Route path="/contracts/*"  element={<Guarded module="contracts"><ContractsPage /></Guarded>} />
