@@ -28,12 +28,16 @@ function formatTimeOnly(isoStr) {
 
 export default function AttendancePage() {
   const { user, can } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const isHRManager = user?.role === 'hr_manager';
+  const isPayroll = user?.role === 'payroll_user' || user?.role === 'payroll_manager';
   const isEmployee = user?.role === 'employee';
+  const isSelfOnly = isEmployee || isPayroll;
   const canManageAll = can('attendance', 'write') === 'all';
 
   const [searchParams, setSearchParams] = useSearchParams();
   const employeeIdFilter = searchParams.get('employee_id') || '';
-  const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
+  const effectiveEmpId = isSelfOnly && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const statusFilter = searchParams.get('status') || '';
   const [missingOnly, setMissingOnly] = useState(false);
 
@@ -46,6 +50,22 @@ export default function AttendancePage() {
 
   // Reference data
   const employees = useApi(() => api.get('/employees'), []);
+
+  // Filter available employees by role:
+  // - Admin: all employees
+  // - HR Manager: subordinates (where manager_id == user.employee_id) plus self (id == user.employee_id)
+  // - Self-only (employee, payroll): only self
+  const availableEmployees = useMemo(() => {
+    const list = employees.data || [];
+    if (isAdmin) return list;
+    if (isHRManager) {
+      return list.filter((emp) => emp.manager_id === user?.employee_id || emp.id === user?.employee_id);
+    }
+    if (isSelfOnly) {
+      return list.filter((emp) => emp.id === user?.employee_id);
+    }
+    return list;
+  }, [employees.data, isAdmin, isHRManager, isSelfOnly, user?.employee_id]);
 
   // Today status of active employee
   const { data: todayStatus, reload: reloadStatus } = useApi(
@@ -110,8 +130,12 @@ export default function AttendancePage() {
   const openCreateModal = () => {
     setEditingRow(null);
     const nowIso = new Date().toISOString().slice(0, 16);
+    const defaultEmpId = isSelfOnly && user?.employee_id
+      ? String(user.employee_id)
+      : (employeeIdFilter || (user?.employee_id ? String(user.employee_id) : ''));
+
     setForm({
-      employee_id: isEmployee && user?.employee_id ? String(user.employee_id) : (employeeIdFilter || ''),
+      employee_id: defaultEmpId,
       check_in: nowIso,
       check_out: '',
       status: 'present',
@@ -189,16 +213,20 @@ export default function AttendancePage() {
       label: 'Employee',
       render: (r) => (
         <div>
-          <span
-            className="clickable"
-            style={{ fontWeight: 600, color: 'var(--accent)' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setSearchParams({ employee_id: String(r.employee_id) });
-            }}
-          >
-            {r.employee_name}
-          </span>
+          {isSelfOnly ? (
+            <span style={{ fontWeight: 600 }}>{r.employee_name}</span>
+          ) : (
+            <span
+              className="clickable"
+              style={{ fontWeight: 600, color: 'var(--accent)' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchParams({ employee_id: String(r.employee_id) });
+              }}
+            >
+              {r.employee_name}
+            </span>
+          )}
           <div className="meta">{r.department_name || 'General'}</div>
         </div>
       ),
@@ -264,7 +292,7 @@ export default function AttendancePage() {
         )
       ),
     },
-  ], [setSearchParams]);
+  ], [setSearchParams, isSelfOnly]);
 
   return (
     <>
@@ -273,51 +301,55 @@ export default function AttendancePage() {
           <h1>Time & Attendance</h1>
           <p className="meta">Track working hours, overtime, half-days, and clock exceptions</p>
         </div>
-        <div className="row">
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            + Log Attendance Entry
-          </button>
-        </div>
+        {!isAdmin && (
+          <div className="row">
+            <button className="btn btn-primary" onClick={openCreateModal}>
+              + Log Attendance Entry
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Quick Check-in / Check-out Banner */}
-      <Card
-        className="card"
-        style={{
-          background: isCheckedIn ? '#ecfdf5' : 'var(--surface)',
-          borderColor: isCheckedIn ? '#a7f3d0' : 'var(--border)',
-          marginBottom: 16,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: isCheckedIn ? 'var(--success)' : 'var(--text)' }}>
-                {isCheckedIn ? '● Currently Checked In' : '○ Not Checked In'}
-              </span>
-              {isCheckedIn && (
-                <span className="badge badge-success">
-                  Since {formatTimeOnly(todayStatus.check_in)}
+      {/* Quick Check-in / Check-out Banner (Hidden for Admin) */}
+      {!isAdmin && (
+        <Card
+          className="card"
+          style={{
+            background: isCheckedIn ? '#ecfdf5' : 'var(--surface)',
+            borderColor: isCheckedIn ? '#a7f3d0' : 'var(--border)',
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: isCheckedIn ? 'var(--success)' : 'var(--text)' }}>
+                  {isCheckedIn ? '● Currently Checked In' : '○ Not Checked In'}
                 </span>
-              )}
+                {isCheckedIn && (
+                  <span className="badge badge-success">
+                    Since {formatTimeOnly(todayStatus?.check_in)}
+                  </span>
+                )}
+              </div>
+              <p className="meta" style={{ marginTop: 4 }}>
+                {isCheckedIn
+                  ? `Logged in employee (${todayStatus?.employee_name || user?.name}). Click check out when your shift completes to derive worked hours.`
+                  : 'Click check in to start tracking your working shift today.'}
+              </p>
             </div>
-            <p className="meta" style={{ marginTop: 4 }}>
-              {isCheckedIn
-                ? `Logged in employee (${todayStatus.employee_name}). Click check out when your shift completes to derive worked hours.`
-                : 'Click check in to start tracking your working shift today.'}
-            </p>
-          </div>
 
-          <button
-            className={`btn ${isCheckedIn ? 'btn-danger' : 'btn-primary'}`}
-            style={{ minWidth: 160, padding: '10px 18px', fontWeight: 600 }}
-            disabled={quickActionLoading}
-            onClick={handleQuickCheckInOut}
-          >
-            {quickActionLoading ? 'Processing...' : isCheckedIn ? 'Check Out Now' : 'Check In Now'}
-          </button>
-        </div>
-      </Card>
+            <button
+              className={`btn ${isCheckedIn ? 'btn-danger' : 'btn-primary'}`}
+              style={{ minWidth: 160, padding: '10px 18px', fontWeight: 600 }}
+              disabled={quickActionLoading}
+              onClick={handleQuickCheckInOut}
+            >
+              {quickActionLoading ? 'Processing...' : isCheckedIn ? 'Check Out Now' : 'Check In Now'}
+            </button>
+          </div>
+        </Card>
+      )}
 
       {/* Exception Warning Banner */}
       {missingCheckoutCount > 0 && (
@@ -330,8 +362,8 @@ export default function AttendancePage() {
       <div style={{ height: 12 }} />
 
       <Card className="card" title="Filter Records">
-        <div className={!isEmployee ? "grid grid-2" : "grid"}>
-          {!isEmployee && (
+        <div className={!isSelfOnly ? "grid grid-2" : "grid"}>
+          {!isSelfOnly && (
             <div className="field">
               <label>Employee</label>
               <select
@@ -344,10 +376,10 @@ export default function AttendancePage() {
                   setSearchParams(next);
                 }}
               >
-                <option value="">All Employees</option>
-                {(employees.data || []).map((emp) => (
+                <option value="">{isHRManager ? 'All My Team Members & Self' : 'All Employees'}</option>
+                {availableEmployees.map((emp) => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.name}
+                    {emp.name} {emp.id === user?.employee_id ? '(You)' : ''}
                   </option>
                 ))}
               </select>
@@ -426,19 +458,19 @@ export default function AttendancePage() {
               </Alert>
             )}
 
-            <fieldset disabled={isEmployee && Boolean(editingRow)} style={{ border: 'none', padding: 0, margin: 0, display: 'grid', gap: 16 }}>
+            <fieldset disabled={isSelfOnly && Boolean(editingRow)} style={{ border: 'none', padding: 0, margin: 0, display: 'grid', gap: 16 }}>
             <Field label="Employee *">
               <select
                 className="select"
                 value={form.employee_id}
                 onChange={(e) => setForm({ ...form, employee_id: e.target.value })}
-                disabled={Boolean(editingRow) || isEmployee}
+                disabled={Boolean(editingRow) || isSelfOnly}
                 required
               >
-                <option value="">Select Employee...</option>
-                {(employees.data || []).map((emp) => (
+                {!isSelfOnly && <option value="">Select Employee...</option>}
+                {availableEmployees.map((emp) => (
                   <option key={emp.id} value={emp.id}>
-                    {emp.name}
+                    {emp.name} {emp.id === user?.employee_id ? '(You)' : ''}
                   </option>
                 ))}
               </select>
@@ -493,9 +525,9 @@ export default function AttendancePage() {
 
             <div className="row" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
               <button type="button" className="btn" onClick={() => setModalOpen(false)}>
-                {isEmployee && editingRow ? 'Close' : 'Cancel'}
+                {isSelfOnly && editingRow ? 'Close' : 'Cancel'}
               </button>
-              {(!isEmployee || !editingRow) && (
+              {(!isSelfOnly || !editingRow) && (
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   {saving ? 'Saving...' : editingRow ? 'Save Correction' : 'Log Entry'}
                 </button>
