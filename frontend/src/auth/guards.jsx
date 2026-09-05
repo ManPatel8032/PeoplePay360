@@ -20,10 +20,6 @@ export function RequireAuth({ children }) {
   if (booting) return <Booting />;
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
 
-  // A forced password change blocks the rest of the app.
-  if (user.must_change_password && location.pathname !== '/change-password') {
-    return <Navigate to="/change-password" replace />;
-  }
   return children;
 }
 
@@ -55,6 +51,6 @@ export function RequireRole({ module, children }) {
 export function RedirectIfAuthed({ children }) {
   const { user, booting } = useAuth();
   if (booting) return <Booting />;
-  if (user) return <Navigate to={user.must_change_password ? '/change-password' : '/dashboard'} replace />;
+  if (user) return <Navigate to="/dashboard" replace />;
   return children;
 }

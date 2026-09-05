@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import AuthLayout from './AuthLayout.jsx';
 
@@ -13,8 +13,6 @@ function hintFor(status) {
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,8 +21,6 @@ export default function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(null);
-
-  const from = location.state?.from?.pathname || '/dashboard';
 
   function validate() {
     const errs = {};
@@ -43,7 +39,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const user = await login(email.trim(), password);
-      setDone(user.must_change_password ? '/change-password' : from);
+      setDone('/dashboard');
     } catch (err) {
       setError({ message: err.message, hint: hintFor(err.status) });
       setPassword('');
