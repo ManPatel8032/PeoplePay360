@@ -4,12 +4,12 @@ import { query, one } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import { hoursBetween } from '../lib/dates.js';
-import { blockManagerAttendance, rejected } from '../lib/guards.js';
+import { blockManagerAttendance, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
 export const attendance = Router();
 
 const ATT_SQL = `
-  SELECT a.*, e.name AS employee_name, d.name AS department_name,
+  SELECT a.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
          ROUND(EXTRACT(EPOCH FROM (COALESCE(a.check_out, NOW()) - a.check_in))::numeric / 3600, 2) AS worked_hours
     FROM attendance a
     JOIN employees e ON e.id = a.employee_id

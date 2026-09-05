@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
 
 function formatDateTime(isoStr) {
   if (!isoStr) return '—';
@@ -318,6 +318,7 @@ export default function AttendancePage() {
   };
 
   const columns = useMemo(() => [
+    empNumberColumn,
     {
       key: 'employee_name',
       label: 'Employee',

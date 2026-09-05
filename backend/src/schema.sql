@@ -311,3 +311,35 @@ WITH RECURSIVE chain AS (
 SELECT c.id, c.name, c.manager_id, c.level, c.path,
        (SELECT COUNT(*) FROM employees r WHERE r.manager_id = c.id)::int AS direct_reports
   FROM chain c;
+
+-- ============ EMPLOYEE NUMBER ============
+-- Human-readable staff code shown on every employee-facing table. Derived from
+-- the primary key so it can never drift or need maintaining.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'employees' AND column_name = 'employee_number'
+  ) THEN
+    ALTER TABLE employees
+      ADD COLUMN employee_number TEXT
+      GENERATED ALWAYS AS ('EMP-' || LPAD(id::text, 4, '0')) STORED;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_emp_number ON employees(employee_number);
+
+/*
+ * Everyone at or below a given employee in the reporting chain.
+ * A manager sees their whole subtree, not just direct reports, so a department
+ * head still sees the people under their team leads.
+ */
+CREATE OR REPLACE FUNCTION employee_subtree(root_id INTEGER)
+RETURNS TABLE (id INTEGER) AS $$
+  WITH RECURSIVE tree AS (
+    SELECT e.id FROM employees e WHERE e.id = root_id
+    UNION ALL
+    SELECT e.id FROM employees e JOIN tree t ON e.manager_id = t.id
+  )
+  SELECT tree.id FROM tree;
+$$ LANGUAGE sql STABLE;

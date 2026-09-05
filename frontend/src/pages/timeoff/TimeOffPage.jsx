@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
 import LeaveBalanceWidget from '../../components/LeaveBalanceWidget.jsx';
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -185,6 +185,7 @@ export default function TimeOffPage() {
   }, [requests]);
 
   const requestColumns = useMemo(() => [
+    empNumberColumn,
     {
       key: 'employee_name',
       label: 'Employee',
@@ -392,6 +393,7 @@ export default function TimeOffPage() {
   };
 
   const allocationColumns = useMemo(() => [
+    empNumberColumn,
     {
       key: 'employee_name',
       label: 'Employee',

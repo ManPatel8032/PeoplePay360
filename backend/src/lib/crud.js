@@ -15,13 +15,29 @@ export const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)
  *   (e.g. `FROM employees e` needs `'e.id'`) — Postgres rejects a reference to the
  *   bare table name once an alias is in scope.
  */
-export function crudRouter({ table, module, columns, listSql, itemSql, filters = {}, orderBy = 'id DESC', searchCol, idColumn }) {
+/**
+ * @param {string} [idColumn]
+ *   Column to match in `GET /:id`. Required whenever `itemSql` aliases the table
+ *   (e.g. `FROM employees e` needs `'e.id'`) — Postgres rejects a reference to the
+ *   bare table name once an alias is in scope.
+ * @param {object} [scope]
+ *   Row-level visibility, applied on top of the role check.
+ *   `scope.filter(req, params)` returns a SQL fragment (or null) narrowing the
+ *   list; `scope.canSee(req, row)` decides a single record.
+ */
+export function crudRouter({ table, module, columns, listSql, itemSql, filters = {}, orderBy = 'id DESC', searchCol, idColumn, scope }) {
   const r = Router();
   const idCol = idColumn || `${table}.id`;
 
   r.get('/', can(module, 'read'), ah(async (req, res) => {
     const where = [];
     const params = [];
+
+    if (scope?.filter) {
+      const fragment = await scope.filter(req, params);
+      if (fragment) where.push(fragment);
+    }
+
     for (const [q, col] of Object.entries(filters)) {
       if (req.query[q] !== undefined && req.query[q] !== '') {
         params.push(req.query[q]);
@@ -43,6 +59,9 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
   r.get('/:id', can(module, 'read'), ah(async (req, res) => {
     const row = await one(`${itemSql || `SELECT * FROM ${table}`} WHERE ${idCol} = $1`, [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Not found' });
+    if (scope?.canSee && !(await scope.canSee(req, row))) {
+      return res.status(403).json({ error: 'This record is outside your team' });
+    }
     res.json({ data: row });
   }));
 

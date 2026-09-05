@@ -3,6 +3,7 @@ import { query, one } from '../db.js';
 import { can } from '../auth.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { contractForPeriod } from '../lib/payroll.js';
+import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
 const EMP_SQL = `
   SELECT e.*, d.name AS department_name, j.name AS job_position_name,
@@ -24,11 +25,20 @@ export const employees = crudRouter({
   filters: { department_id: 'e.department_id', status: 'e.status', employee_type: 'e.employee_type' },
   searchCol: 'e.name',
   orderBy: 'e.name ASC',
+  // A manager sees their own record plus everyone below them in the chart;
+  // an individual contributor sees only themselves.
+  scope: {
+    filter: (req, params) => employeeScopeFilter(req, 'e.id', params),
+    canSee: (req, row) => canSeeEmployee(req, row.id),
+  },
 });
 
 /** Smart-button counts + live leave balances for the employee form (B2). */
 employees.get('/:id/summary', can('employees', 'read'), ah(async (req, res) => {
   const id = req.params.id;
+  if (!(await canSeeEmployee(req, id))) {
+    return res.status(403).json({ error: 'This record is outside your team' });
+  }
   const today = new Date().toISOString().slice(0, 10);
   const count = async (t) => (await one(`SELECT COUNT(*)::int n FROM ${t} WHERE employee_id = $1`, [id])).n;
 

@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { query, one } from '../db.js';
 import { can, scopeToSelf } from '../auth.js';
+import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 import { ah } from '../lib/crud.js';
 import { daysBetween } from '../lib/dates.js';
 
@@ -61,7 +62,7 @@ types.delete('/:id', can('timeoff_approve', 'write'), ah(async (req, res) => {
 
 // =================== ALLOCATIONS ===================
 const ALLOC_SQL = `
-  SELECT a.*, e.name AS employee_name, t.name AS type_name, t.unit, t.color AS type_color,
+  SELECT a.*, e.name AS employee_name, e.employee_number, t.name AS type_name, t.unit, t.color AS type_color,
          COALESCE((SELECT SUM(duration) FROM time_off_requests
                     WHERE employee_id = a.employee_id AND type_id = a.type_id AND state = 'approved'), 0) AS taken
     FROM allocations a
@@ -71,14 +72,18 @@ const ALLOC_SQL = `
 export const allocations = Router();
 
 allocations.get('/', can('allocations', 'read'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
-  const employeeId = selfId || req.query.employee_id;
   const typeId = req.query.type_id;
   const state = req.query.state;
   const search = req.query.search;
 
   const where = [];
   const params = [];
+
+  // Managers see their whole subtree; ICs see only their own.
+  const scopeSql = await employeeScopeFilter(req, 'a.employee_id', params);
+  if (scopeSql) where.push(scopeSql);
+
+  const employeeId = req.query.employee_id;
 
   if (employeeId) {
     params.push(employeeId);
@@ -113,9 +118,8 @@ allocations.get('/', can('allocations', 'read'), ah(async (req, res) => {
 allocations.get('/:id', can('allocations', 'read'), ah(async (req, res) => {
   const row = await one(`${ALLOC_SQL} WHERE a.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const selfId = scopeToSelf(req);
-  if (selfId && row.employee_id !== selfId) {
-    return res.status(403).json({ error: 'Cannot view allocation for another employee' });
+  if (!(await canSeeEmployee(req, row.employee_id))) {
+    return res.status(403).json({ error: 'This allocation is outside your team' });
   }
   res.json({
     data: {
@@ -182,7 +186,7 @@ allocations.delete('/:id', can('allocations', 'write'), ah(async (req, res) => {
 
 // =================== REQUESTS ===================
 const REQ_SQL = `
-  SELECT r.*, e.name AS employee_name, d.name AS department_name,
+  SELECT r.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
          t.name AS type_name, t.unit, t.requires_allocation, t.is_paid, t.color AS type_color,
          u.name AS approver_name
     FROM time_off_requests r
@@ -226,14 +230,18 @@ requests.get('/balances/:employeeId', can('timeoff', 'read'), ah(async (req, res
 }));
 
 requests.get('/', can('timeoff', 'read'), ah(async (req, res) => {
-  const selfId = scopeToSelf(req);
-  const employeeId = selfId || req.query.employee_id;
   const state = req.query.state;
   const typeId = req.query.type_id;
   const search = req.query.search;
 
   const where = [];
   const params = [];
+
+  // Managers see their whole subtree; ICs see only their own.
+  const scopeSql = await employeeScopeFilter(req, 'r.employee_id', params);
+  if (scopeSql) where.push(scopeSql);
+
+  const employeeId = req.query.employee_id;
 
   if (employeeId) {
     params.push(employeeId);
@@ -260,9 +268,8 @@ requests.get('/', can('timeoff', 'read'), ah(async (req, res) => {
 requests.get('/:id', can('timeoff', 'read'), ah(async (req, res) => {
   const row = await one(`${REQ_SQL} WHERE r.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
-  const selfId = scopeToSelf(req);
-  if (selfId && row.employee_id !== selfId) {
-    return res.status(403).json({ error: 'Cannot view request for another employee' });
+  if (!(await canSeeEmployee(req, row.employee_id))) {
+    return res.status(403).json({ error: 'This request is outside your team' });
   }
   res.json({ data: row });
 }));
