@@ -171,14 +171,9 @@ permission has a conflict of interest ([`backend/src/lib/guards.js`](backend/src
 The full auth contract (endpoints, token rules, error shapes, schema additions) is frozen
 in [PLAN.md](PLAN.md#auth-contract) so all three sections can build against it in parallel.
 
-### Signing up
+### User Provisioning
 
-`/signup` is **not** open registration. A visitor can only create an account if their work
-email already exists on an `employees` record that has no user yet, and the account is
-always created with the `employee` role — a `role` in the request body is ignored, so
-nobody can self-elevate. Both failure cases return one identical message, so signup cannot
-be used to discover who works here. HR, payroll and admin accounts are created by an
-administrator.
+Self-service signup is disabled. All user accounts (employee, HR, payroll, and admin) are provisioned directly by an administrator via `/users`. Any navigation to `/signup` redirects to `/login`.
 
 ### Dev note
 

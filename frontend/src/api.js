@@ -19,7 +19,7 @@ export const getAccessToken = () => accessToken;
 export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
 
 /** Endpoints that must never trigger the refresh-and-retry loop. */
-const NO_RETRY = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
+const NO_RETRY = ['/auth/login', '/auth/refresh', '/auth/logout'];
 
 let refreshInFlight = null;
 
