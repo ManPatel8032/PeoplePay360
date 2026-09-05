@@ -2,7 +2,7 @@
  * Shared UI kit. Everyone builds pages out of these so the three tracks look
  * like one product. Add to this file rather than inventing local variants.
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 
 /** Data-fetching hook that gives you all four states for free. */
 export function useApi(fetcher, deps = []) {
@@ -165,7 +165,7 @@ export const empNumberColumn = {
 /**
  * Debounce a rapidly changing value by `delay` ms.
  */
-export function useDebounce(value, delay = 2000) {
+export function useDebounce(value, delay = 300) {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
   useEffect(() => {
@@ -189,7 +189,7 @@ export function SearchInput({
   onChange,
   onImmediateChange,
   placeholder = 'Search...',
-  delay = 2000,
+  delay = 300,
   className = '',
   style = {},
   id,
@@ -197,18 +197,30 @@ export function SearchInput({
 }) {
   const [internalValue, setInternalValue] = useState(externalValue ?? '');
   const debounced = useDebounce(internalValue, delay);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const isMountedRef = useRef(false);
+  const lastNotifiedRef = useRef(externalValue ?? '');
 
   // Synchronize when external value changes from outside (e.g. Reset button)
   useEffect(() => {
     if (externalValue !== undefined && externalValue !== internalValue) {
       setInternalValue(externalValue);
+      lastNotifiedRef.current = externalValue;
     }
   }, [externalValue]);
 
-  // Notify parent of debounced change
+  // Notify parent of debounced change only when debounced actually changes
   useEffect(() => {
-    onChange?.(debounced);
-  }, [debounced, onChange]);
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      return;
+    }
+    if (debounced !== lastNotifiedRef.current) {
+      lastNotifiedRef.current = debounced;
+      onChangeRef.current?.(debounced);
+    }
+  }, [debounced]);
 
   const handleInputChange = (e) => {
     const val = e.target.value;
@@ -218,8 +230,9 @@ export function SearchInput({
 
   const handleClear = () => {
     setInternalValue('');
+    lastNotifiedRef.current = '';
     onImmediateChange?.('');
-    onChange?.('');
+    onChangeRef.current?.('');
   };
 
   return (

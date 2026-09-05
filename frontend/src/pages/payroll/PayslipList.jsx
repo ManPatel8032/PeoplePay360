@@ -2,15 +2,26 @@
  * Payslip List (B7) — standalone filterable list of all payslips across payruns.
  * Respects scopeToSelf on the backend — employees see only their own.
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, qs, money } from '../../api.js';
 import { useApi, States, Table, Badge, empNumberColumn, SearchInput } from '../../components/ui.jsx';
 import PayslipDetail from './PayslipDetail.jsx';
 
 export default function PayslipList() {
-  const [filters, setFilters] = useState({ payrun_id: '', employee_id: '', state: '' });
-  const [search, setSearch] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlState = searchParams.get('state') || '';
+  const urlSearch = searchParams.get('search') || '';
+  const [filters, setFilters] = useState({ payrun_id: '', employee_id: '', state: urlState });
+  const [search, setSearch] = useState(urlSearch);
   const [selectedId, setSelectedId] = useState(null);
+
+  useEffect(() => {
+    const s = searchParams.get('state') || '';
+    const q = searchParams.get('search') || '';
+    setFilters((f) => (f.state === s ? f : { ...f, state: s }));
+    if (q) setSearch(q);
+  }, [searchParams]);
 
   const { data, loading, error, reload } = useApi(
     () => api.get(`/payslips${qs(filters)}`), [filters.payrun_id, filters.employee_id, filters.state]

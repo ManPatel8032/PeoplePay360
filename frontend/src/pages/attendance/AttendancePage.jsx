@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
@@ -43,6 +43,12 @@ export default function AttendancePage() {
   const searchFilter = searchParams.get('search') || '';
   const isMissingFromUrl = statusFilter === 'missing_checkout' || searchParams.get('missing_checkout') === 'true';
   const [missingOnly, setMissingOnly] = useState(isMissingFromUrl);
+
+  useEffect(() => {
+    if (isMissingFromUrl && !missingOnly) {
+      setMissingOnly(true);
+    }
+  }, [isMissingFromUrl]);
 
   // Modals & form state
   const [modalOpen, setModalOpen] = useState(false);
@@ -575,6 +581,8 @@ export default function AttendancePage() {
             placeholder="Search attendance by employee name..."
             value={searchFilter}
             onChange={(val) => {
+              const current = searchParams.get('search') || '';
+              if ((val || '') === current) return;
               const next = new URLSearchParams(searchParams);
               if (val) next.set('search', val);
               else next.delete('search');

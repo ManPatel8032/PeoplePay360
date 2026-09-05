@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, SearchInput } from '../../components/ui.jsx';
+import { useApi, States, SearchInput, Alert } from '../../components/ui.jsx';
 
 
 import EmployeeList from './EmployeeList.jsx';
@@ -11,6 +12,8 @@ import EmployeeFormModal from './EmployeeFormModal.jsx';
 
 export default function EmployeesPage() {
   const { user, can } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const missingBank = searchParams.get('missing_bank') === 'true';
 
   const [viewMode, setViewMode] = useState('list');
   const [search, setSearch] = useState('');
@@ -69,8 +72,12 @@ export default function EmployeesPage() {
       result = result.filter((e) => e.employee_type === typeFilter);
     }
 
+    if (missingBank) {
+      result = result.filter((e) => !e.bank_account && e.status !== 'inactive');
+    }
+
     return result;
-  }, [rawEmployees, search, departmentFilter, statusFilter, typeFilter]);
+  }, [rawEmployees, search, departmentFilter, statusFilter, typeFilter, missingBank]);
 
   // Employee self-view
   if (isEmployeeSelfScope) {
@@ -138,6 +145,26 @@ export default function EmployeesPage() {
               )}
             </div>
           </div>
+
+          {missingBank && (
+            <div style={{ marginBottom: 16 }}>
+              <Alert level="warning">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 12 }}>
+                  <span>Filtered by: <strong>Employees missing bank details</strong> ({filteredEmployees.length} found)</span>
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => {
+                      const next = new URLSearchParams(searchParams);
+                      next.delete('missing_bank');
+                      setSearchParams(next);
+                    }}
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              </Alert>
+            </div>
+          )}
 
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="row" style={{ justifyContent: 'space-between' }}>

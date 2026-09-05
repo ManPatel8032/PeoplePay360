@@ -106,22 +106,13 @@ router.get('/', can('dashboard', 'read'), ah(async (req, res) => {
         AND ($2::text IS NULL OR e.employee_type = $2)`,
     [dept, etype]
   );
-  if (noBank.n) alerts.push({ level: 'error', message: `${noBank.n} employee(s) missing bank details`, link: '/employees' });
-
-  const noContract = await one(
-    `SELECT COUNT(*)::int n FROM employees e
-      WHERE e.status='active'
-        AND NOT EXISTS (SELECT 1 FROM contracts c WHERE c.employee_id=e.id AND c.state='running'
-                          AND c.start_date <= $2 AND (c.end_date IS NULL OR c.end_date >= $1))
-        AND ${empFilter}`, p
-  );
-  if (noContract.n) alerts.push({ level: 'error', message: `${noContract.n} active employee(s) without a contract for this period`, link: '/contracts' });
+  if (noBank.n) alerts.push({ level: 'error', message: `${noBank.n} employee(s) missing bank details`, link: '/employees?missing_bank=true' });
 
   const expiring = await one(
     `SELECT COUNT(*)::int n FROM contracts c JOIN employees e ON e.id=c.employee_id
       WHERE c.state='running' AND c.end_date IS NOT NULL AND c.end_date BETWEEN $1 AND $2 AND ${empFilter}`, p
   );
-  if (expiring.n) alerts.push({ level: 'warning', message: `${expiring.n} contract(s) expiring in this period`, link: '/contracts' });
+  if (expiring.n) alerts.push({ level: 'warning', message: `${expiring.n} contract(s) expiring in this period`, link: '/contracts?expiring=true' });
 
   const dupes = await query(
     `SELECT e.name, ps.period_start, COUNT(*)::int n
@@ -130,11 +121,11 @@ router.get('/', can('dashboard', 'read'), ah(async (req, res) => {
       GROUP BY e.name, ps.period_start HAVING COUNT(*) > 1`, p
   );
   for (const d of dupes)
-    alerts.push({ level: 'error', message: `Duplicate payslips for ${d.name} (${d.period_start}) — ${d.n} found`, link: '/payslips' });
+    alerts.push({ level: 'error', message: `Duplicate payslips for ${d.name} (${d.period_start}) — ${d.n} found`, link: `/payroll?tab=payslips&search=${encodeURIComponent(d.name)}` });
 
-  if (Number(timeOff.pending_requests)) alerts.push({ level: 'info', message: `${timeOff.pending_requests} time off request(s) awaiting approval`, link: '/time-off/requests' });
-  if (Number(attendance.missing_checkout)) alerts.push({ level: 'warning', message: `${attendance.missing_checkout} attendance record(s) missing check-out`, link: '/attendance' });
-  if (Number(kpi.draft_count)) alerts.push({ level: 'info', message: `${kpi.draft_count} payslip(s) still in draft`, link: '/payruns' });
+  if (Number(timeOff.pending_requests)) alerts.push({ level: 'info', message: `${timeOff.pending_requests} time off request(s) awaiting approval`, link: '/time-off?tab=requests&state=to_approve' });
+  if (Number(attendance.missing_checkout)) alerts.push({ level: 'warning', message: `${attendance.missing_checkout} attendance record(s) missing check-out`, link: '/attendance?missing_checkout=true' });
+  if (Number(kpi.draft_count)) alerts.push({ level: 'info', message: `${kpi.draft_count} payslip(s) still in draft`, link: '/payroll?tab=payslips&state=draft' });
 
   const records = Number(attendance.records) || 0;
   const attendanceHealth = records

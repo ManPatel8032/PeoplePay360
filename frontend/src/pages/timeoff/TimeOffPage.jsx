@@ -47,7 +47,15 @@ export default function TimeOffPage() {
   }, [employeeIdFilter, employees.data, isEmployee, user?.employee_id]);
 
   // =================== REQUESTS TAB ===================
-  const [requestFilterState, setRequestFilterState] = useState('all'); // 'all', 'to_approve', 'approved', 'refused'
+  const urlReqState = searchParams.get('state');
+  const [requestFilterState, setRequestFilterState] = useState(urlReqState || 'all'); // 'all', 'to_approve', 'approved', 'refused'
+
+  useEffect(() => {
+    const s = searchParams.get('state');
+    if (s && s !== requestFilterState) {
+      setRequestFilterState(s);
+    }
+  }, [searchParams]);
   const [requestSearch, setRequestSearch] = useState('');
   const [newRequestModalOpen, setNewRequestModalOpen] = useState(false);
   const [reqSaving, setReqSaving] = useState(false);
