@@ -6,6 +6,7 @@
  *   npm run reset          drop everything, recreate, reseed
  */
 import 'dotenv/config';
+import bcrypt from 'bcryptjs';
 import { pool, query, one, tx, migrate, waitForDb } from './db.js';
 import { computePayslip } from './lib/payroll.js';
 import { monthBounds } from './lib/dates.js';
@@ -151,15 +152,23 @@ async function main() {
   await query('UPDATE employees SET manager_id = $1 WHERE department_id = $2 AND id <> $1', [empIds[7], depts['Human Resources']]);
 
   // ---------- users / roles ----------
+  const SEED_PASSWORD = process.env.SEED_PASSWORD || 'Password123!';
+  const passwordHash = bcrypt.hashSync(SEED_PASSWORD, 10);
+
   const userDefs = [
-    ['Ops Admin',      'admin@peoplepay360.com',    'admin',           null],
-    ['Meera Joshi',    'meera.hr@peoplepay360.com', 'hr_manager',      empIds[7]],
-    ['Arjun Patel',    'arjun.pay@peoplepay360.com','payroll_manager', empIds[10]],
-    ['Ishita Banerjee','ishita.pay@peoplepay360.com','payroll_user',   empIds[9]],
-    ['Priya Nair',     'priya.emp@peoplepay360.com','employee',        empIds[1]],
+    ['Ops Admin',       'admin@peoplepay360.com',    'admin',           null],
+    ['Meera Joshi',     'meera.hr@peoplepay360.com', 'hr_manager',      empIds[7]],
+    ['Arjun Patel',     'arjun.pay@peoplepay360.com','payroll_manager', empIds[10]],
+    ['Ishita Banerjee', 'ishita.pay@peoplepay360.com','payroll_user',   empIds[9]],
+    ['Priya Nair',      'priya.emp@peoplepay360.com','employee',        empIds[1]],
   ];
-  for (const u of userDefs)
-    await query('INSERT INTO users (name,email,role,employee_id) VALUES ($1,$2,$3,$4)', u);
+  for (const [name, email, role, empId] of userDefs) {
+    await query(
+      `INSERT INTO users (name, email, password_hash, role, employee_id, is_active, must_change_password)
+       VALUES ($1, $2, $3, $4, $5, TRUE, TRUE)`,
+      [name, email, passwordHash, role, empId]
+    );
+  }
 
   // ---------- contracts (A2) — history + a renewal so period selection matters ----------
   const twoYearsAgo = new Date(Date.UTC(today.getUTCFullYear() - 1, today.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);

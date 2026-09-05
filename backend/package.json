@@ -16,6 +16,10 @@
     "pdfkit": "^0.16.0",
     "zod": "^3.24.1",
     "pg": "^8.13.1",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "cookie-parser": "^1.4.7",
+    "express-rate-limit": "^7.5.0"
   }
 }
