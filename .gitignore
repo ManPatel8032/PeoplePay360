@@ -1,0 +1,13 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+.DS_Store
+.vscode/
+coverage/
+payslips-out/

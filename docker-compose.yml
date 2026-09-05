@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: pp360-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pp360
+      POSTGRES_PASSWORD: pp360
+      POSTGRES_DB: peoplepay360
+    ports:
+      - "5433:5432"          # 5433 on the host so it never clashes with a local Postgres
+    volumes:
+      - pp360_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pp360 -d peoplepay360"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pp360_data:

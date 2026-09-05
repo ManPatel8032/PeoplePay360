@@ -1,0 +1,25 @@
+{
+  "name": "peoplepay360",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "seed": "npm --workspace server run seed",
+    "reset": "npm --workspace server run reset",
+    "db:up": "docker compose up -d db",
+    "db:down": "docker compose down",
+    "db:nuke": "docker compose down -v",
+    "setup": "npm run db:up && npm install && npm run reset",
+    "test": "npm --workspace server run test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
