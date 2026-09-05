@@ -9,8 +9,15 @@ import { can } from '../auth.js';
 /** Wrap an async handler so rejections reach the error middleware. */
 export const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-export function crudRouter({ table, module, columns, listSql, itemSql, filters = {}, orderBy = 'id DESC', searchCol }) {
+/**
+ * @param {string} [idColumn]
+ *   Column to match in `GET /:id`. Required whenever `itemSql` aliases the table
+ *   (e.g. `FROM employees e` needs `'e.id'`) — Postgres rejects a reference to the
+ *   bare table name once an alias is in scope.
+ */
+export function crudRouter({ table, module, columns, listSql, itemSql, filters = {}, orderBy = 'id DESC', searchCol, idColumn }) {
   const r = Router();
+  const idCol = idColumn || `${table}.id`;
 
   r.get('/', can(module, 'read'), ah(async (req, res) => {
     const where = [];
@@ -34,7 +41,7 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
   }));
 
   r.get('/:id', can(module, 'read'), ah(async (req, res) => {
-    const row = await one(`${itemSql || `SELECT * FROM ${table}`} WHERE ${table}.id = $1`, [req.params.id]);
+    const row = await one(`${itemSql || `SELECT * FROM ${table}`} WHERE ${idCol} = $1`, [req.params.id]);
     if (!row) return res.status(404).json({ error: 'Not found' });
     res.json({ data: row });
   }));

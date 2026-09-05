@@ -158,8 +158,10 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
   const selfId = scopeToSelf(req);
   let { employee_id, check_in, check_out, status = 'present', notes } = req.body;
 
+  // An employee may only ever log attendance against themselves, whatever the
+  // body says. This assignment is the only thing enforcing that.
   if (selfId) {
-    employeeId = selfId;
+    employee_id = selfId;
   }
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
   if (!check_in) return res.status(400).json({ error: 'Check-in time is required' });

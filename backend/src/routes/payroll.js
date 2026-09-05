@@ -20,6 +20,7 @@ export const structures = crudRouter({
   columns: ['name', 'code', 'active'],
   listSql: STRUCT_SQL,
   itemSql: STRUCT_SQL,
+  idColumn: 's.id',
   filters: { active: 's.active' },
   searchCol: 's.name',
   orderBy: 's.name',
@@ -42,6 +43,7 @@ export const rules = crudRouter({
               JOIN salary_structures s ON s.id = r.structure_id`,
   itemSql: `SELECT r.*, s.name AS structure_name FROM salary_rules r
               JOIN salary_structures s ON s.id = r.structure_id`,
+  idColumn: 'r.id',
   filters: { structure_id: 'r.structure_id', category: 'r.category' },
   searchCol: 'r.name',
   orderBy: 'r.sequence, r.id',
@@ -92,6 +94,7 @@ export const payruns = crudRouter({
   columns: ['name', 'structure_id', 'period_start', 'period_end', 'department_id', 'state'],
   listSql: PAYRUN_SQL,
   itemSql: PAYRUN_SQL,
+  idColumn: 'p.id',
   filters: { state: 'p.state', structure_id: 'p.structure_id', department_id: 'p.department_id' },
   searchCol: 'p.name',
   orderBy: 'p.period_start DESC, p.id DESC',
