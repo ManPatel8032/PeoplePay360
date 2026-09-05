@@ -110,6 +110,7 @@ export default function PayrunDetail({ payrunId, onBack }) {
                 <h2>{run.name}</h2>
                 <p className="meta">
                   {run.structure_name} · {run.period_start} → {run.period_end}
+                  {run.period_start && run.period_end ? ` (${Math.round((new Date(run.period_end) - new Date(run.period_start)) / 86400000) + 1} days)` : ''}
                   {run.department_name ? ` · ${run.department_name}` : ''}
                 </p>
               </>

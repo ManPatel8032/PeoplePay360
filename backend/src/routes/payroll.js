@@ -71,14 +71,9 @@ rules.post('/preview', can('rules', 'read'), ah(async (req, res) => {
   if (!employee) return res.status(400).json({ error: 'Pick an employee to preview against' });
   const contract = await contractForPeriod(employee_id, period_start, period_end);
   const stats = await periodStats(employee, contract, period_start, period_end);
-  const { computeRules } = await import('../lib/payroll.js');
-  const result = await computeRules(structure_id, {
-    wage: Number(contract?.wage) || 0,
-    worked_days: stats.workedDays, working_days: stats.workingDays,
-    attended_days: stats.attendedDays, attendance_hours: stats.attendanceHours,
-    overtime_hours: stats.overtimeHours, paid_leave_days: stats.paidLeaveDays,
-    unpaid_leave_days: stats.unpaidLeaveDays, leave_days: stats.leaveDays, late_days: stats.lateDays,
-  });
+  const { computeRules, buildPayrollContext } = await import('../lib/payroll.js');
+  const ctx = buildPayrollContext(contract, stats, period_start, period_end);
+  const result = await computeRules(structure_id, ctx);
   res.json({ data: { ...result, stats, contract } });
 }));
 
