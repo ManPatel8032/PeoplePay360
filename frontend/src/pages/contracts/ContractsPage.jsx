@@ -503,8 +503,8 @@ export default function ContractsPage() {
                 <input
                   className="input"
                   type="number"
-                  min="1"
-                  step="100"
+                  min="0"
+                  step="any"
                   placeholder="e.g. 50000"
                   value={form.wage}
                   onChange={(e) => handleFieldChange('wage', e.target.value)}

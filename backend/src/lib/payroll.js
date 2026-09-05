@@ -7,7 +7,7 @@
  *     any rule that already ran, by code (RULE.BASIC) or by category total (CAT.ALW).
  */
 import { query, one, tx } from '../db.js';
-import { scheduledDays, overlapDays, hoursBetween, daysBetween } from './dates.js';
+import { scheduledDays, overlapDays, hoursBetween, daysBetween, monthBounds } from './dates.js';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -109,12 +109,13 @@ export async function computeRules(structureId, ctx) {
   const byCode = {};                                   // RULE.BASIC -> amount
   const cat = { BASIC: 0, ALW: 0, GROSS: 0, DED: 0, NET: 0 };
   const lines = [];
+  const periodRatio = ctx.period_ratio ?? 1;
 
   for (const rule of rules) {
     let amount = 0;
     try {
       if (rule.compute_type === 'fixed') {
-        amount = Number(rule.amount) || 0;
+        amount = (Number(rule.amount) || 0) * periodRatio;
       } else if (rule.compute_type === 'percent') {
         const base = byCode[rule.percent_base] ?? cat[rule.percent_base] ?? 0;
         amount = (base * (Number(rule.amount) || 0)) / 100;
@@ -185,6 +186,39 @@ export async function collectWarnings({ employee, contract, stats, payrunId, per
   return w;
 }
 
+/**
+ * Build evaluation context for payroll rules.
+ * Automatically prorates monthly contract wage and fixed allowances if the payrun
+ * covers a custom period (e.g., 10 days instead of a full month).
+ */
+export function buildPayrollContext(contract, stats, periodStart, periodEnd) {
+  const baseWage = Number(contract?.wage) || 0;
+  const periodDays = daysBetween(periodStart, periodEnd);
+  const d = new Date(periodStart + 'T00:00:00Z');
+  const { start: mStart, end: mEnd } = monthBounds(d.getUTCFullYear(), d.getUTCMonth() + 1);
+  const monthDays = daysBetween(mStart, mEnd);
+  const isFullMonth = periodStart === mStart && periodEnd === mEnd;
+  const periodRatio = isFullMonth ? 1 : periodDays / monthDays;
+  const wage = round2(baseWage * periodRatio);
+
+  return {
+    wage,
+    monthly_wage: baseWage,
+    period_ratio: periodRatio,
+    period_days: periodDays,
+    month_days: monthDays,
+    worked_days: stats.workedDays,
+    working_days: stats.workingDays,
+    attended_days: stats.attendedDays,
+    attendance_hours: stats.attendanceHours,
+    overtime_hours: stats.overtimeHours,
+    paid_leave_days: stats.paidLeaveDays,
+    unpaid_leave_days: stats.unpaidLeaveDays,
+    leave_days: stats.leaveDays,
+    late_days: stats.lateDays,
+  };
+}
+
 /** Compute (or recompute) one payslip in place. */
 export async function computePayslip(payslipId) {
   const slip = await one('SELECT * FROM payslips WHERE id = $1', [payslipId]);
@@ -201,18 +235,7 @@ export async function computePayslip(payslipId) {
   // The Payrun's structure wins; the contract's structure is the fallback (B7).
   const structureId = payrun.structure_id || contract?.structure_id;
 
-  const ctx = {
-    wage: Number(contract?.wage) || 0,
-    worked_days: stats.workedDays,
-    working_days: stats.workingDays,
-    attended_days: stats.attendedDays,
-    attendance_hours: stats.attendanceHours,
-    overtime_hours: stats.overtimeHours,
-    paid_leave_days: stats.paidLeaveDays,
-    unpaid_leave_days: stats.unpaidLeaveDays,
-    leave_days: stats.leaveDays,
-    late_days: stats.lateDays,
-  };
+  const ctx = buildPayrollContext(contract, stats, slip.period_start, slip.period_end);
 
   const { lines, gross, net } = structureId
     ? await computeRules(structureId, ctx)

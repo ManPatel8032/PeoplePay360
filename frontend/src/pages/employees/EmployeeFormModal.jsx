@@ -104,7 +104,10 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
       fn();
     }
   };
-
+  const phone_regex = /^[0-9]{10}$/;
+  function valid_phone(phone) {
+    return phone_regex.test(phone);
+  }
   useEffect(() => {
     let alive = true;
     Promise.all([
@@ -147,6 +150,50 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
     }
     if (!form.work_email.trim()) {
       setFieldErrors((prev) => ({ ...prev, work_email: 'Work email is required' }));
+      return;
+    }
+    if (!form.work_email.includes('@')) {
+      setFieldErrors((prev) => ({ ...prev, work_email: 'Invalid email address' }));
+      return;
+    }
+    if (!form.work_email.includes('.')) {
+      setFieldErrors((prev) => ({ ...prev, work_email: 'Invalid email address' }));
+      return;
+    }
+    if (!form.phone) {
+      setFieldErrors((prev) => ({ ...prev, phone: 'Phone number is required' }));
+      return;
+    }
+    if (!valid_phone(form.phone)) {
+      setFieldErrors((prev) => ({ ...prev, phone: 'Phone number must be at least 10 digits' }));
+      return;
+    }
+    if (!form.job_position_id) {
+      setFieldErrors((prev) => ({ ...prev, job_position_id: 'Job position is required' }));
+      return;
+    }
+    if (!form.department_id) {
+      setFieldErrors((prev) => ({ ...prev, department_id: 'Department is required' }));
+      return;
+    }
+    if (!form.manager_id) {
+      setFieldErrors((prev) => ({ ...prev, manager_id: 'Manager is required' }));
+      return;
+    }
+    if (!form.schedule_id) {
+      setFieldErrors((prev) => ({ ...prev, schedule_id: 'Schedule is required' }));
+      return;
+    }
+    if (!form.join_date) {
+      setFieldErrors((prev) => ({ ...prev, join_date: 'Join date is required' }));
+      return;
+    }
+    if (!form.employee_type) {
+      setFieldErrors((prev) => ({ ...prev, employee_type: 'Employee type is required' }));
+      return;
+    }
+    if (!form.status) {
+      setFieldErrors((prev) => ({ ...prev, status: 'Status is required' }));
       return;
     }
 
@@ -230,7 +277,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
               className="input"
               value={form.phone}
               onChange={handleChange}
-              placeholder="+91 9876543210"
+              placeholder="10 digit number"
             />
           </Field>
 
@@ -242,6 +289,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
                 onToggle={() => { setAddingDept((v) => !v); setNewDept(''); }}
               />
             }
+            error={fieldErrors.department_id}
           >
             {addingDept ? (
               <div className="row" style={{ flexWrap: 'nowrap' }}>
@@ -286,6 +334,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
                 onToggle={() => { setAddingPos((v) => !v); setNewPos(''); }}
               />
             }
+            error={fieldErrors.job_position_id}
           >
             {addingPos ? (
               <div className="row" style={{ flexWrap: 'nowrap' }}>
@@ -322,7 +371,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
             )}
           </Field>
 
-          <Field label="Manager">
+          <Field label="Manager" error={fieldErrors.manager_id}>
             <select
               name="manager_id"
               className="select"
@@ -336,7 +385,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
             </select>
           </Field>
 
-          <Field label="Working Schedule">
+          <Field label="Working Schedule" error={fieldErrors.schedule_id}>
             <select
               name="schedule_id"
               className="select"
@@ -350,7 +399,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
             </select>
           </Field>
 
-          <Field label="Employee Type">
+          <Field label="Employee Type" error={fieldErrors.employee_type}>
             <select
               name="employee_type"
               className="select"
@@ -364,7 +413,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
             </select>
           </Field>
 
-          <Field label="Status">
+          <Field label="Status" error={fieldErrors.status}>
             <select
               name="status"
               className="select"
@@ -377,7 +426,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
             </select>
           </Field>
 
-          <Field label="Join Date">
+          <Field label="Join Date" error={fieldErrors.join_date}>
             <input
               type="date"
               name="join_date"
@@ -388,7 +437,7 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
           </Field>
 
           <div style={{ gridColumn: 'span 2' }}>
-            <Field label="Bank Account">
+            <Field label="Bank Account" error={fieldErrors.bank_account}>
               <input
                 type="text"
                 name="bank_account"

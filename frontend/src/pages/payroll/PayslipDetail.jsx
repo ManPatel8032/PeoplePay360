@@ -80,7 +80,8 @@ export default function PayslipDetail({ payslipId, onBack }) {
               <>
                 <h2>Payslip — {slip.employee_name}</h2>
                 <p className="meta">
-                  {slip.structure_name} · {slip.period_start} → {slip.period_end} · <Badge value={slip.state} />
+                  {slip.structure_name} · {slip.period_start} → {slip.period_end}
+                  {slip.period_start && slip.period_end ? ` (${Math.round((new Date(slip.period_end) - new Date(slip.period_start)) / 86400000) + 1} days)` : ''} · <Badge value={slip.state} />
                 </p>
               </>
             )}
@@ -134,7 +135,7 @@ export default function PayslipDetail({ payslipId, onBack }) {
                   {slip.contract ? slip.contract.name : '—'}
                 </div>
                 <div className="kpi-sub">
-                  {slip.contract ? `Wage: ${moneyExact(slip.contract.wage)}` : 'No contract found'}
+                  {slip.contract ? `Contract Wage: ${moneyExact(slip.contract.wage)} / mo` : 'No contract found'}
                 </div>
               </div>
             </Card>

@@ -343,3 +343,78 @@ RETURNS TABLE (id INTEGER) AS $$
   )
   SELECT tree.id FROM tree;
 $$ LANGUAGE sql STABLE;
+
+-- ============ PAYRUN & PAYSLIP IMMUTABILITY GUARDS ============
+-- Prevents updating or deleting validated/paid payruns and payslips directly in SQL.
+CREATE OR REPLACE FUNCTION trg_lock_validated_payrun()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.state IN ('validated', 'paid') THEN
+      RAISE EXCEPTION 'Cannot delete a % payrun — it is a historical record', OLD.state;
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.state IN ('validated', 'paid') THEN
+      -- Allow transitioning from validated -> paid
+      IF OLD.state = 'validated' AND NEW.state = 'paid'
+         AND NEW.name = OLD.name
+         AND NEW.structure_id = OLD.structure_id
+         AND NEW.period_start = OLD.period_start
+         AND NEW.period_end = OLD.period_end
+         AND (NEW.department_id IS NOT DISTINCT FROM OLD.department_id) THEN
+        RETURN NEW;
+      END IF;
+
+      RAISE EXCEPTION 'Cannot modify a % payrun — it is a historical record', OLD.state;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_payruns_immutable ON payruns;
+CREATE TRIGGER trg_payruns_immutable
+BEFORE UPDATE OR DELETE ON payruns
+FOR EACH ROW EXECUTE FUNCTION trg_lock_validated_payrun();
+
+CREATE OR REPLACE FUNCTION trg_lock_validated_payslip()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.state IN ('validated', 'paid') THEN
+      RAISE EXCEPTION 'Cannot delete a % payslip — it is a historical record', OLD.state;
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.state IN ('validated', 'paid') THEN
+      -- Allow transitioning from validated -> paid
+      IF OLD.state = 'validated' AND NEW.state = 'paid' THEN
+        RETURN NEW;
+      END IF;
+      -- Allow updating sent_at timestamp when payslip is emailed
+      IF NEW.state = OLD.state AND (NEW.sent_at IS DISTINCT FROM OLD.sent_at)
+         AND NEW.gross = OLD.gross AND NEW.net = OLD.net THEN
+        RETURN NEW;
+      END IF;
+
+      RAISE EXCEPTION 'Cannot modify a % payslip — it is a historical record', OLD.state;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_payslips_immutable ON payslips;
+CREATE TRIGGER trg_payslips_immutable
+BEFORE UPDATE OR DELETE ON payslips
+FOR EACH ROW EXECUTE FUNCTION trg_lock_validated_payslip();
+
