@@ -6,6 +6,7 @@ import { contractForPeriod } from '../lib/payroll.js';
 import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^(\+91[\s-]?)?[0-9]{10}$/;
 const EMPLOYEE_TYPES = ['full_time', 'part_time', 'contract', 'intern'];
 const EMPLOYEE_STATUSES = ['active', 'on_leave', 'inactive'];
 
@@ -23,6 +24,10 @@ function validateEmployee(body, requireName) {
   if (body.work_email && !EMAIL_RE.test(String(body.work_email).trim())) {
     return { status: 400, error: `"${body.work_email}" is not a valid email address` };
   }
+  if (body.phone && !PHONE_RE.test(String(body.phone).trim())) {
+    return { status: 400, error: 'Phone number must be at least 10 digits (e.g. 9876543210 or +91 9876543210)' };
+  }
+
   if (body.employee_type && !EMPLOYEE_TYPES.includes(body.employee_type)) {
     return { status: 400, error: `Employee type must be one of: ${EMPLOYEE_TYPES.join(', ')}` };
   }
