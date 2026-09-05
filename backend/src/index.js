@@ -46,7 +46,7 @@ app.use('/api/positions', positions);
 // Time off
 app.use('/api/time-off/types', timeoff.types);
 app.use('/api/time-off/allocations', timeoff.allocations);
-app.use('/api/time-off/requests', timeoff.withDuration, timeoff.requests);
+app.use('/api/time-off/requests', timeoff.requests);
 
 // Payroll
 app.use('/api/structures', payroll.structures);
