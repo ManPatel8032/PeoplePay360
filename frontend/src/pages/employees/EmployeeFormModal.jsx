@@ -2,6 +2,25 @@ import { useState, useEffect } from 'react';
 import { api } from '../../api.js';
 import { Modal, Field, Alert } from '../../components/ui.jsx';
 
+/** Field label with an inline "+ New" toggle, so lookups can be created in place. */
+function LabelWithAdd({ text, adding, onToggle }) {
+  return (
+    <span className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+      <span>{text}</span>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          background: 'none', border: 0, padding: 0, cursor: 'pointer',
+          font: 'inherit', fontSize: 11, fontWeight: 600, color: 'var(--accent)',
+        }}
+      >
+        {adding ? 'Cancel' : '+ New'}
+      </button>
+    </span>
+  );
+}
+
 export default function EmployeeFormModal({ employee, onClose, onSaved }) {
   const isEditing = Boolean(employee?.id);
 
@@ -27,6 +46,64 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // Inline creation of the two lookup tables. Without this the dropdowns are
+  // frozen to whatever the seed inserted and HR cannot onboard into a new
+  // department or job title.
+  const [addingDept, setAddingDept] = useState(false);
+  const [addingPos, setAddingPos] = useState(false);
+  const [newDept, setNewDept] = useState('');
+  const [newPos, setNewPos] = useState('');
+  const [lookupSaving, setLookupSaving] = useState(false);
+
+  const rows = (r) => (Array.isArray(r) ? r : r?.data || []);
+
+  async function createDepartment() {
+    const name = newDept.trim();
+    if (!name) return;
+    setLookupSaving(true);
+    setError(null);
+    try {
+      const created = await api.post('/departments', { name });
+      setDepartments(rows(await api.get('/departments')));
+      setForm((prev) => ({ ...prev, department_id: String(created.id), job_position_id: '' }));
+      setNewDept('');
+      setAddingDept(false);
+    } catch (err) {
+      setError(err.message || 'Could not create department');
+    } finally {
+      setLookupSaving(false);
+    }
+  }
+
+  async function createPosition() {
+    const name = newPos.trim();
+    if (!name) return;
+    setLookupSaving(true);
+    setError(null);
+    try {
+      const created = await api.post('/positions', {
+        name,
+        department_id: form.department_id ? Number(form.department_id) : null,
+      });
+      setPositions(rows(await api.get('/positions')));
+      setForm((prev) => ({ ...prev, job_position_id: String(created.id) }));
+      setNewPos('');
+      setAddingPos(false);
+    } catch (err) {
+      setError(err.message || 'Could not create job position');
+    } finally {
+      setLookupSaving(false);
+    }
+  }
+
+  /** Enter inside an inline lookup field must not submit the employee form. */
+  const submitOnEnter = (fn) => (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      fn();
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -157,32 +234,92 @@ export default function EmployeeFormModal({ employee, onClose, onSaved }) {
             />
           </Field>
 
-          <Field label="Department">
-            <select
-              name="department_id"
-              className="select"
-              value={form.department_id}
-              onChange={handleChange}
-            >
-              <option value="">— Select Department —</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+          <Field
+            label={
+              <LabelWithAdd
+                text="Department"
+                adding={addingDept}
+                onToggle={() => { setAddingDept((v) => !v); setNewDept(''); }}
+              />
+            }
+          >
+            {addingDept ? (
+              <div className="row" style={{ flexWrap: 'nowrap' }}>
+                <input
+                  type="text"
+                  className="input"
+                  value={newDept}
+                  autoFocus
+                  placeholder="e.g. Customer Success"
+                  onChange={(e) => setNewDept(e.target.value)}
+                  onKeyDown={submitOnEnter(createDepartment)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={createDepartment}
+                  disabled={lookupSaving || !newDept.trim()}
+                >
+                  {lookupSaving ? '…' : 'Add'}
+                </button>
+              </div>
+            ) : (
+              <select
+                name="department_id"
+                className="select"
+                value={form.department_id}
+                onChange={handleChange}
+              >
+                <option value="">— Select Department —</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            )}
           </Field>
 
-          <Field label="Job Position">
-            <select
-              name="job_position_id"
-              className="select"
-              value={form.job_position_id}
-              onChange={handleChange}
-            >
-              <option value="">— Select Position —</option>
-              {filteredPositions.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+          <Field
+            label={
+              <LabelWithAdd
+                text="Job Position"
+                adding={addingPos}
+                onToggle={() => { setAddingPos((v) => !v); setNewPos(''); }}
+              />
+            }
+          >
+            {addingPos ? (
+              <div className="row" style={{ flexWrap: 'nowrap' }}>
+                <input
+                  type="text"
+                  className="input"
+                  value={newPos}
+                  autoFocus
+                  placeholder="e.g. Support Engineer"
+                  onChange={(e) => setNewPos(e.target.value)}
+                  onKeyDown={submitOnEnter(createPosition)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={createPosition}
+                  disabled={lookupSaving || !newPos.trim()}
+                >
+                  {lookupSaving ? '…' : 'Add'}
+                </button>
+              </div>
+            ) : (
+              <select
+                name="job_position_id"
+                className="select"
+                value={form.job_position_id}
+                onChange={handleChange}
+              >
+                <option value="">— Select Position —</option>
+                {filteredPositions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            )}
           </Field>
 
           <Field label="Manager">
