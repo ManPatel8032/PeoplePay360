@@ -1,10 +1,13 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 
 import { migrate, waitForDb, query } from './db.js';
 import { attachUser, MATRIX } from './auth.js';
 import { ah } from './lib/crud.js';
+import authRouter from './routes/auth.js';
+import usersRouter from './routes/users.js';
 import { employees, departments, positions } from './routes/employees.js';
 import { contracts } from './routes/contracts.js';
 import { schedules } from './routes/schedules.js';
@@ -15,6 +18,7 @@ import dashboard from './routes/dashboard.js';
 
 const app = express();
 app.use(cors());
+app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', ah(async (_req, res) => {
@@ -24,15 +28,12 @@ app.get('/api/health', ah(async (_req, res) => {
 
 app.use('/api', attachUser);
 
-// Who am I + the role list, so the client can render the role switcher.
+// Section 1: Auth & User management
+app.use('/api/auth', authRouter);
+app.use('/api/users', usersRouter);
+
+// Backward-compatible me endpoint for demo role switcher
 app.get('/api/me', (req, res) => res.json({ data: { user: req.user, permissions: MATRIX } }));
-app.get('/api/users', ah(async (_req, res) => {
-  const data = await query(
-    `SELECT u.*, e.name AS employee_name FROM users u
-     LEFT JOIN employees e ON e.id = u.employee_id ORDER BY u.id`
-  );
-  res.json({ data });
-}));
 
 // HR
 app.use('/api/employees', employees);

@@ -58,17 +58,21 @@ export default function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
 
-            {/* Track A — owned by dev A */}
-            <Route path="/employees/*"  element={<Placeholder title="Employees"  owner="Track A" />} />
-            <Route path="/contracts/*"  element={<Placeholder title="Contracts"  owner="Track A" />} />
+            {/* Section 1 — Identity, Access & Employee Master */}
+            <Route path="/login" element={<Placeholder title="Login" owner="Section 1" />} />
+            <Route path="/change-password" element={<Placeholder title="Change Password" owner="Section 1" />} />
+            <Route path="/users/*" element={<Placeholder title="User Administration" owner="Section 1" />} />
+            <Route path="/employees/*" element={<Placeholder title="Employees" owner="Section 1" />} />
 
-            {/* Track B — owned by dev B */}
-            <Route path="/attendance/*" element={<Placeholder title="Attendance" owner="Track B" />} />
-            <Route path="/time-off/*"   element={<Placeholder title="Time Off"   owner="Track B" />} />
+            {/* Section 2 — Contracts, Time & Attendance */}
+            <Route path="/contracts/*" element={<Placeholder title="Contracts" owner="Section 2" />} />
+            <Route path="/attendance/*" element={<Placeholder title="Attendance" owner="Section 2" />} />
+            <Route path="/schedules/*" element={<Placeholder title="Schedules" owner="Section 2" />} />
+            <Route path="/time-off/*" element={<Placeholder title="Time Off" owner="Section 2" />} />
 
-            {/* Track C — owned by dev C */}
-            <Route path="/payroll/*"    element={<Placeholder title="Payroll"    owner="Track C" />} />
-            <Route path="/config/*"     element={<Placeholder title="Configuration" owner="Track C" />} />
+            {/* Section 3 — Payroll, Payslips & Reporting */}
+            <Route path="/payroll/*" element={<Placeholder title="Payroll" owner="Section 3" />} />
+            <Route path="/config/*" element={<Placeholder title="Configuration" owner="Section 3" />} />
 
             <Route path="*" element={<div className="state"><h3>Page not found</h3></div>} />
           </Routes>

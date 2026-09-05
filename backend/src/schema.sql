@@ -54,15 +54,41 @@ CREATE TABLE IF NOT EXISTS employees (
 CREATE INDEX IF NOT EXISTS idx_emp_dept   ON employees(department_id);
 CREATE INDEX IF NOT EXISTS idx_emp_status ON employees(status);
 
--- ============ USERS / RBAC (Section 3) ============
+-- ============ USERS / RBAC (Section 1) ============
 CREATE TABLE IF NOT EXISTS users (
-  id          SERIAL PRIMARY KEY,
-  name        TEXT NOT NULL,
-  email       TEXT NOT NULL UNIQUE,
-  role        TEXT NOT NULL CHECK (role IN ('employee','hr_manager','payroll_user','payroll_manager','admin')),
-  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                   SERIAL PRIMARY KEY,
+  name                 TEXT NOT NULL,
+  email                TEXT NOT NULL UNIQUE,
+  password_hash        TEXT NOT NULL,
+  role                 TEXT NOT NULL CHECK (role IN ('employee','hr_manager','payroll_user','payroll_manager','admin')),
+  employee_id          INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  is_active            BOOLEAN NOT NULL DEFAULT TRUE,
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+  failed_attempts      INTEGER NOT NULL DEFAULT 0,
+  locked_until         TIMESTAMPTZ,
+  last_login_at        TIMESTAMPTZ,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+-- ============ REFRESH TOKENS (Section 1) ============
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,   -- store the hash, never the token
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
 
 -- ============ SALARY CONFIG (A5, A6) ============
 CREATE TABLE IF NOT EXISTS salary_structures (

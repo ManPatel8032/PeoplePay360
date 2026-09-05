@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "workspaces": [
-    "server",
-    "client"
+    "backend",
+    "frontend"
   ],
   "scripts": {
     "dev": "concurrently -n server,client -c blue,magenta \"npm:dev:server\" \"npm:dev:client\"",
