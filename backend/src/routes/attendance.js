@@ -29,6 +29,56 @@ function writeTarget(req, requestedId) {
   return { error: 'You cannot record attendance' };
 }
 
+/**
+ * Get employee's scheduled full-day work hours for a specific date from their contract/schedule.
+ * Defaults to 8 hours if no schedule is assigned.
+ */
+export async function getEmployeeFullDayHours(employeeId, checkInDate = new Date()) {
+  if (!employeeId) return 8;
+  try {
+    const row = await one(
+      `SELECT sl.start_time, sl.end_time, sl.break_minutes
+         FROM contracts c
+         JOIN schedule_lines sl ON sl.schedule_id = c.schedule_id
+        WHERE c.employee_id = $1
+          AND c.state = 'running'
+          AND sl.day_of_week = EXTRACT(DOW FROM $2::timestamptz)
+        LIMIT 1`,
+      [employeeId, checkInDate]
+    );
+    if (row && row.start_time && row.end_time) {
+      const [sh, sm] = row.start_time.split(':').map(Number);
+      const [eh, em] = row.end_time.split(':').map(Number);
+      const breakH = (Number(row.break_minutes) || 0) / 60;
+      const scheduled = (eh + em / 60) - (sh + sm / 60) - breakH;
+      if (scheduled > 0) return Math.round(scheduled * 100) / 100;
+    }
+  } catch (err) {
+    // Fall back to standard 8 hours
+  }
+  return 8;
+}
+
+/**
+ * Derive attendance status from worked hours:
+ * - > max(fullDayHours + 1, 9): 'overtime'
+ * - >= fullDayHours: 'present' (full day amount of work reached)
+ * - > 4 and < fullDayHours: 'half_day' (half day is > 4 hrs and less than full day amount of work)
+ * - <= 4 hours: 'absent' (less than or equal to 4 hours is under half day threshold)
+ */
+export function deriveAttendanceStatus(h, defaultStatus = 'present', fullDayHours = 8) {
+  const fullDay = Number(fullDayHours) > 0 ? Number(fullDayHours) : 8;
+  const otThreshold = Math.max(fullDay + 1, 9);
+  if (h > otThreshold) return 'overtime';
+  if (h >= fullDay) {
+    return defaultStatus === 'overtime' || defaultStatus === 'half_day' || defaultStatus === 'absent'
+      ? 'present'
+      : defaultStatus;
+  }
+  if (h > 4) return 'half_day';
+  return 'absent';
+}
+
 const ATT_SQL = `
   SELECT a.*, e.name AS employee_name, e.employee_number, d.name AS department_name,
          ROUND(EXTRACT(EPOCH FROM (COALESCE(a.check_out, NOW()) - a.check_in))::numeric / 3600, 2) AS worked_hours
@@ -50,6 +100,7 @@ attendance.get('/today-status', can('attendance', 'read'), ah(async (req, res) =
       WHERE a.employee_id = $1
         AND (
           a.check_in >= CURRENT_DATE
+          OR a.check_in >= NOW() - INTERVAL '24 hours'
           OR (a.check_out IS NULL AND a.check_in >= NOW() - INTERVAL '16 hours')
         )
       ORDER BY (a.check_out IS NULL) DESC, a.check_in DESC
@@ -219,7 +270,8 @@ attendance.post('/check-out', can('attendance', 'write'), ah(async (req, res) =>
 
   const at = req.body.check_out || new Date().toISOString();
   const h = hoursBetween(open.check_in, at);
-  const status = h > 9 ? 'overtime' : h < 4 ? 'half_day' : (open.status || 'present');
+  const fullDay = await getEmployeeFullDayHours(employeeId, open.check_in);
+  const status = deriveAttendanceStatus(h, open.status || 'present', fullDay);
 
   const updated = await one(
     'UPDATE attendance SET check_out=$1, status=$2 WHERE id=$3 RETURNING id',
@@ -239,8 +291,8 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
   if (!canSeeEmployee(req, row.employee_id, 'attendance')) {
     return res.status(403).json({ error: 'You can only check out for your own attendance record' });
   }
-  {
-  }
+
+  if (rejected(res, await blockManagerAttendance(req, row.employee_id))) return;
 
   // Calculate check_out time: if historical missed check-out (> 16 hours), cap to 8h shift
   let checkOutTime = req.body.check_out;
@@ -256,7 +308,8 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
   }
 
   const h = hoursBetween(row.check_in, checkOutTime);
-  const status = h > 9 ? 'overtime' : h < 4 ? 'half_day' : (row.status || 'present');
+  const fullDay = await getEmployeeFullDayHours(row.employee_id, row.check_in);
+  const status = deriveAttendanceStatus(h, row.status || 'present', fullDay);
   const notes = isHistorical
     ? (row.notes ? `${row.notes} [Missed check-out closed]` : 'Missed check-out closed (standard 8 hrs)')
     : row.notes;
@@ -277,6 +330,11 @@ attendance.post('/close-missed-checkouts', can('attendance', 'write'), ah(async 
 
   const scopeSql = employeeScopeFilter(req, 'employee_id', params, 'attendance');
   if (scopeSql) where.push(scopeSql);
+
+  // Managers' attendance requires admin review
+  if (req.user?.role !== 'admin') {
+    where.push('employee_id NOT IN (SELECT manager_id FROM employees WHERE manager_id IS NOT NULL)');
+  }
 
   if (scope(req, 'attendance', 'write') === 'own' && !req.user?.employee_id) {
     return res.status(400).json({ error: 'No employee associated with this account' });
@@ -310,6 +368,13 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
   if (target.error) return res.status(403).json({ error: target.error });
   employee_id = target.employeeId;
 
+  if (!canSeeEmployee(req, employee_id, 'attendance', 'write')) {
+    return res.status(403).json({ error: 'Cannot record attendance for this employee' });
+  }
+  if (employee_id !== req.user?.employee_id) {
+    if (rejected(res, await blockManagerAttendance(req, employee_id))) return;
+  }
+
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
   if (!check_in) return res.status(400).json({ error: 'Check-in time is required' });
 
@@ -319,10 +384,12 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
     }
     const h = hoursBetween(check_in, check_out);
     if (!req.body.status) {
-      status = h > 9 ? 'overtime' : h < 4 ? 'half_day' : 'present';
+      const fullDay = await getEmployeeFullDayHours(employee_id, check_in);
+      status = deriveAttendanceStatus(h, 'present', fullDay);
     }
   }
 
+  const role = req.user?.role;
   const isManual = Boolean(req.body.manual_edit || role !== 'employee');
 
   const inserted = await one(
@@ -367,7 +434,8 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
 
   if (check_out && check_in && req.body.status === undefined) {
     const h = hoursBetween(check_in, check_out);
-    status = h > 9 ? 'overtime' : h < 4 ? 'half_day' : status;
+    const fullDay = await getEmployeeFullDayHours(employee_id, check_in);
+    status = deriveAttendanceStatus(h, existing.status || 'present', fullDay);
   }
 
   await one(

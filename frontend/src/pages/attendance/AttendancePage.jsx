@@ -27,6 +27,14 @@ function formatTimeOnly(isoStr) {
   });
 }
 
+function toLocalDatetimeString(dateInput) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export default function AttendancePage() {
   const { user, can } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -45,9 +53,7 @@ export default function AttendancePage() {
   const [missingOnly, setMissingOnly] = useState(isMissingFromUrl);
 
   useEffect(() => {
-    if (isMissingFromUrl && !missingOnly) {
-      setMissingOnly(true);
-    }
+    setMissingOnly(isMissingFromUrl);
   }, [isMissingFromUrl]);
 
   // Modals & form state
@@ -213,10 +219,11 @@ export default function AttendancePage() {
     setMissingOnly(nextVal);
     const next = new URLSearchParams(searchParams);
     if (nextVal) {
-      next.set('status', 'missing_checkout');
+      next.set('missing_checkout', 'true');
+      next.delete('status');
     } else {
-      if (statusFilter === 'missing_checkout') next.delete('status');
       next.delete('missing_checkout');
+      if (next.get('status') === 'missing_checkout') next.delete('status');
     }
     setSearchParams(next);
   };
@@ -240,7 +247,7 @@ export default function AttendancePage() {
 
   const openCreateModal = () => {
     setEditingRow(null);
-    const nowIso = new Date().toISOString().slice(0, 16);
+    const nowIso = toLocalDatetimeString(new Date());
     const defaultEmpId = isSelfOnly && user?.employee_id
       ? String(user.employee_id)
       : (employeeIdFilter || (user?.employee_id ? String(user.employee_id) : ''));
@@ -258,8 +265,8 @@ export default function AttendancePage() {
 
   const openEditModal = (row) => {
     setEditingRow(row);
-    const inIso = row.check_in ? new Date(row.check_in).toISOString().slice(0, 16) : '';
-    const outIso = row.check_out ? new Date(row.check_out).toISOString().slice(0, 16) : '';
+    const inIso = row.check_in ? toLocalDatetimeString(row.check_in) : '';
+    const outIso = row.check_out ? toLocalDatetimeString(row.check_out) : '';
     setForm({
       employee_id: String(row.employee_id),
       check_in: inIso,
@@ -354,13 +361,20 @@ export default function AttendancePage() {
       render: (r) => {
         if (!r.check_out) {
           const isOwnRecord = Number(r.employee_id) === Number(user?.employee_id);
-          const canClose = (missingOnly || statusFilter === 'missing_checkout') && (isOwnRecord || isHRManager || isAdmin);
+          const isStale = isMissingActive || (Date.now() - new Date(r.check_in).getTime() > 16 * 3600 * 1000);
+          const canClose = isOwnRecord || isHRManager || isAdmin;
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span className="badge badge-danger" style={{ fontSize: 11 }}>
-                Missing Check-out
-              </span>
-              {canClose && (
+              {isStale ? (
+                <span className="badge badge-danger" style={{ fontSize: 11 }}>
+                  Missing Check-out
+                </span>
+              ) : (
+                <span className="badge badge-info" style={{ fontSize: 11 }}>
+                  ● In Progress
+                </span>
+              )}
+              {isStale && canClose && (
                 <button
                   className="btn btn-sm btn-danger"
                   style={{ padding: '2px 8px', fontSize: 11, fontWeight: 600 }}
@@ -572,9 +586,11 @@ export default function AttendancePage() {
               onChange={(e) => {
                 const val = e.target.value;
                 const next = new URLSearchParams(searchParams);
+                next.delete('missing_checkout');
                 if (val === 'missing_checkout') {
                   setMissingOnly(true);
-                  next.set('status', 'missing_checkout');
+                  next.set('missing_checkout', 'true');
+                  next.delete('status');
                 } else {
                   setMissingOnly(false);
                   if (val) next.set('status', val);
@@ -585,11 +601,11 @@ export default function AttendancePage() {
             >
               <option value="">All Statuses</option>
               <option value="missing_checkout">Missing Check-out ({missingCheckoutCount})</option>
-              <option value="present">Present (Standard)</option>
+              <option value="present">Present (Full Day: 8 - 9 hrs)</option>
               <option value="overtime">Overtime (&gt; 9 hrs)</option>
-              <option value="half_day">Half Day (&lt; 4 hrs)</option>
+              <option value="half_day">Half Day (&gt; 4 to &lt; 8 hrs)</option>
               <option value="late">Late</option>
-              <option value="absent">Absent</option>
+              <option value="absent">Absent (&le; 4 hrs)</option>
             </select>
           </div>
         </div>
@@ -680,11 +696,11 @@ export default function AttendancePage() {
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value })}
               >
-                <option value="present">Present (Normal)</option>
+                <option value="present">Present (Full Day: 8 - 9h)</option>
                 <option value="overtime">Overtime (&gt; 9h)</option>
-                <option value="half_day">Half Day (&lt; 4h)</option>
+                <option value="half_day">Half Day (&gt; 4 to &lt; 8h)</option>
                 <option value="late">Late Arrival</option>
-                <option value="absent">Absent</option>
+                <option value="absent">Absent (&le; 4h)</option>
               </select>
             </Field>
 

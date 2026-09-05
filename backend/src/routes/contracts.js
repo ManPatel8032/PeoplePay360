@@ -22,8 +22,8 @@ async function findOverlappingContracts(employeeId, startDate, endDate, excludeI
   let sql = `
     SELECT * FROM contracts
      WHERE employee_id = $1 AND state = 'running'
-       AND start_date <= COALESCE($2, DATE '9999-12-31')
-       AND (end_date IS NULL OR end_date >= $3)`;
+       AND start_date <= COALESCE($2::date, DATE '9999-12-31')
+       AND (end_date IS NULL OR end_date >= $3::date)`;
   const params = [employeeId, endDate || null, startDate];
   if (excludeId) {
     params.push(excludeId);
@@ -41,8 +41,8 @@ contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
   const where = [];
   const params = [];
 
-  // Managers see their own record plus their whole subtree; ICs see only their own.
-  const scopeSql = await employeeScopeFilter(req, 'c.employee_id', params);
+  // Visibility based on contracts role scope
+  const scopeSql = employeeScopeFilter(req, 'c.employee_id', params, 'contracts');
   if (scopeSql) where.push(scopeSql);
 
   const employeeId = req.query.employee_id;
@@ -88,7 +88,7 @@ contracts.post('/check-overlap', can('contracts', 'read'), ah(async (req, res) =
 contracts.get('/:id', can('contracts', 'read'), ah(async (req, res) => {
   const row = await one(`${CONTRACT_SQL} WHERE c.id = $1`, [req.params.id]);
   if (!row) return res.status(404).json({ error: 'Not found' });
-  if (!(await canSeeEmployee(req, row.employee_id))) {
+  if (!canSeeEmployee(req, row.employee_id, 'contracts')) {
     return res.status(403).json({ error: 'This contract is outside your team' });
   }
   res.json({ data: row });
@@ -103,6 +103,10 @@ contracts.post('/', can('contracts', 'write'), ah(async (req, res) => {
   } = req.body;
 
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
+
+  if (!canSeeEmployee(req, employee_id, 'contracts', 'write')) {
+    return res.status(403).json({ error: 'Cannot create contract for an employee outside your team' });
+  }
 
   // Only an Admin may set the pay terms of payroll staff.
   if (rejected(res, await blockPayrollStaffPay(req, employee_id))) return;
@@ -157,10 +161,17 @@ contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
   const existing = await one('SELECT * FROM contracts WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
 
+  if (!canSeeEmployee(req, existing.employee_id, 'contracts', 'write')) {
+    return res.status(403).json({ error: 'This contract is outside your team' });
+  }
+
   // Only an Admin may change the pay terms of payroll staff. Non-pay edits
   // (dates, department, schedule) stay open to HR.
   if (rejected(res, await blockPayrollStaffPay(req, existing.employee_id, req.body))) return;
   if (req.body.employee_id !== undefined && req.body.employee_id !== existing.employee_id) {
+    if (!canSeeEmployee(req, req.body.employee_id, 'contracts', 'write')) {
+      return res.status(403).json({ error: 'Cannot reassign contract to employee outside your team' });
+    }
     if (rejected(res, await blockPayrollStaffPay(req, req.body.employee_id, req.body))) return;
   }
 
@@ -175,7 +186,10 @@ contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
   const structure_id = req.body.structure_id !== undefined ? (req.body.structure_id || null) : existing.structure_id;
   const state = req.body.state !== undefined ? req.body.state : existing.state;
 
-  if (wage <= 0) return res.status(400).json({ error: 'Wage must be greater than 0' });
+  if (req.body.name !== undefined && (!name || !name.trim())) {
+    return res.status(400).json({ error: 'Contract name is required' });
+  }
+  if (isNaN(wage) || wage <= 0) return res.status(400).json({ error: 'Wage must be greater than 0' });
   if (end_date && end_date < start_date) {
     return res.status(400).json({ error: 'End date must be on or after start date' });
   }
@@ -203,7 +217,7 @@ contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
        wage = $8, structure_id = $9, state = $10
      WHERE id = $11 RETURNING id`,
     [
-      employee_id, name, start_date, end_date,
+      employee_id, typeof name === 'string' ? name.trim() : name, start_date, end_date,
       department_id, job_position_id, schedule_id,
       wage, structure_id, state, req.params.id
     ]
@@ -215,8 +229,13 @@ contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
 
 // Delete contract
 contracts.delete('/:id', can('contracts', 'delete'), ah(async (req, res) => {
-  const contract = await one('SELECT id, name FROM contracts WHERE id = $1', [req.params.id]);
+  const contract = await one('SELECT id, name, employee_id FROM contracts WHERE id = $1', [req.params.id]);
   if (!contract) return res.status(404).json({ error: 'Contract not found' });
+
+  if (!canSeeEmployee(req, contract.employee_id, 'contracts')) {
+    return res.status(403).json({ error: 'This contract is outside your team' });
+  }
+  if (rejected(res, await blockPayrollStaffPay(req, contract.employee_id))) return;
 
   // Clear contract_id on any payslips referencing this contract
   await query('UPDATE payslips SET contract_id = NULL WHERE contract_id = $1', [req.params.id]);

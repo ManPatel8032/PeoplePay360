@@ -284,4 +284,40 @@ test('hr_manager and admin have Delete operation on employees and contracts', ()
   assert.equal(MATRIX.contracts.employee.delete, 'none', 'employee cannot delete contracts');
 });
 
+test('attendance clock rules: half day is greater than 4 hours and less than full day (8 hours)', async () => {
+  const { deriveAttendanceStatus } = await import('../src/routes/attendance.js');
+
+  // Overtime (> 9h for standard 8h day)
+  assert.equal(deriveAttendanceStatus(10), 'overtime');
+  assert.equal(deriveAttendanceStatus(9.5), 'overtime');
+
+  // Full day present (8h to 9h)
+  assert.equal(deriveAttendanceStatus(9.0), 'present');
+  assert.equal(deriveAttendanceStatus(8.5), 'present');
+  assert.equal(deriveAttendanceStatus(8.0), 'present');
+
+  // Half day (> 4h and < 8h)
+  assert.equal(deriveAttendanceStatus(7.9), 'half_day');
+  assert.equal(deriveAttendanceStatus(6.0), 'half_day');
+  assert.equal(deriveAttendanceStatus(4.5), 'half_day');
+  assert.equal(deriveAttendanceStatus(4.01), 'half_day');
+
+  // <= 4 hours is absent (half day requires strictly > 4 hours)
+  assert.equal(deriveAttendanceStatus(4.0), 'absent');
+  assert.equal(deriveAttendanceStatus(3.5), 'absent');
+  assert.equal(deriveAttendanceStatus(2.0), 'absent');
+  assert.equal(deriveAttendanceStatus(0), 'absent');
+
+  // Dynamic full-day amount of work (e.g. 6-hour shift or 10-hour shift)
+  assert.equal(deriveAttendanceStatus(6.5, 'present', 6), 'present');
+  assert.equal(deriveAttendanceStatus(6.0, 'present', 6), 'present');
+  assert.equal(deriveAttendanceStatus(5.0, 'present', 6), 'half_day');
+  assert.equal(deriveAttendanceStatus(4.0, 'present', 6), 'absent');
+
+  assert.equal(deriveAttendanceStatus(10.0, 'present', 10), 'present');
+  assert.equal(deriveAttendanceStatus(7.5, 'present', 10), 'half_day');
+  assert.equal(deriveAttendanceStatus(4.0, 'present', 10), 'absent');
+});
+
+
 

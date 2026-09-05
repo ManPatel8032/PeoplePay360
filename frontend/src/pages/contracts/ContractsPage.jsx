@@ -76,14 +76,22 @@ export default function ContractsPage() {
     return [];
   }, [structures.data, contracts]);
 
+  const { data: allRunningContracts } = useApi(
+    () => isMissingFilter ? api.get('/contracts?state=running') : Promise.resolve({ data: [] }),
+    [isMissingFilter]
+  );
+
   const missingContractEmployees = useMemo(() => {
     const empList = Array.isArray(employees.data) ? employees.data : employees.data?.data || [];
-    if (!empList.length || !contracts) return [];
+    const runningList = isMissingFilter && allRunningContracts
+      ? (Array.isArray(allRunningContracts) ? allRunningContracts : allRunningContracts.data || [])
+      : (contracts || []);
+    if (!empList.length || !runningList) return [];
     const empWithRunning = new Set(
-      contracts.filter((c) => c.state === 'running').map((c) => Number(c.employee_id))
+      runningList.filter((c) => c.state === 'running').map((c) => Number(c.employee_id))
     );
     return empList.filter((e) => e.status === 'active' && !empWithRunning.has(Number(e.id)));
-  }, [employees.data, contracts]);
+  }, [employees.data, contracts, isMissingFilter, allRunningContracts]);
 
   const displayedContracts = useMemo(() => {
     if (!contracts) return [];
@@ -158,7 +166,7 @@ export default function ContractsPage() {
         end_date: formData.end_date || null,
         exclude_id: editingContract ? editingContract.id : null,
       });
-      const overlapping = res.overlapping || [];
+      const overlapping = res?.overlapping || res?.data?.overlapping || [];
       if (overlapping.length > 0) {
         const conflict = overlapping[0];
         const span = `${conflict.start_date} to ${conflict.end_date || 'indefinite'}`;
@@ -176,9 +184,8 @@ export default function ContractsPage() {
 
   const handleFieldChange = (field, val) => {
     const updated = { ...form, [field]: val };
-    setForm(updated);
 
-    // If changing employee, auto-fill department/position if available
+    // If changing employee, auto-fill department/position/schedule if available
     if (field === 'employee_id' && val) {
       const emp = (employees.data || []).find((e) => String(e.id) === String(val));
       if (emp) {
@@ -190,6 +197,8 @@ export default function ContractsPage() {
         }
       }
     }
+
+    setForm(updated);
 
     if (['state', 'employee_id', 'start_date', 'end_date'].includes(field)) {
       checkOverlap(updated);
