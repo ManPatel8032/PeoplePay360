@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States } from '../../components/ui.jsx';
+import { useApi, States, SearchInput } from '../../components/ui.jsx';
+
 
 import EmployeeList from './EmployeeList.jsx';
 import EmployeeKanban from './EmployeeKanban.jsx';
@@ -50,9 +51,11 @@ export default function EmployeesPage() {
           e.name?.toLowerCase().includes(q) ||
           e.work_email?.toLowerCase().includes(q) ||
           e.job_position_name?.toLowerCase().includes(q) ||
-          e.department_name?.toLowerCase().includes(q)
+          e.department_name?.toLowerCase().includes(q) ||
+          e.employee_number?.toLowerCase().includes(q)
       );
     }
+
 
     if (departmentFilter) {
       result = result.filter((e) => String(e.department_id) === String(departmentFilter));
@@ -139,15 +142,14 @@ export default function EmployeesPage() {
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <div className="row" style={{ flex: 1 }}>
-                <input
+                <SearchInput
                   id="search-employees"
-                  type="text"
-                  className="input"
                   placeholder="Search employees..."
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ width: 240, minHeight: 34 }}
+                  onChange={setSearch}
+                  style={{ width: 250 }}
                 />
+
 
                 <select
                   className="select"

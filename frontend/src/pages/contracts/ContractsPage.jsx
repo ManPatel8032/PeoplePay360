@@ -2,7 +2,10 @@ import { useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api, money } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, empNumberColumn, SearchInput } from '../../components/ui.jsx';
+
+
+
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -25,6 +28,7 @@ export default function ContractsPage() {
   const effectiveEmpId = isEmployee && user?.employee_id ? String(user.employee_id) : employeeIdFilter;
   const stateFilter = searchParams.get('state') || '';
   const structureFilter = searchParams.get('structure_id') || '';
+  const searchFilter = searchParams.get('search') || '';
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingContract, setEditingContract] = useState(null);
@@ -46,11 +50,13 @@ export default function ContractsPage() {
       if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
       if (stateFilter) q.set('state', stateFilter);
       if (structureFilter) q.set('structure_id', structureFilter);
+      if (searchFilter) q.set('search', searchFilter);
       const qs = q.toString();
       return api.get(`/contracts${qs ? '?' + qs : ''}`);
     },
-    [effectiveEmpId, stateFilter, structureFilter]
+    [effectiveEmpId, stateFilter, structureFilter, searchFilter]
   );
+
 
   // Available structures for filtering & contract modal: from reference endpoint or derived from contracts
   const structureOptions = useMemo(() => {
@@ -329,6 +335,19 @@ export default function ContractsPage() {
       </div>
 
       <Card className="card" title="Filter Contracts">
+        <div style={{ marginBottom: 14 }}>
+          <SearchInput
+            placeholder="Search contracts by contract name or employee..."
+            value={searchFilter}
+            onChange={(val) => {
+              const next = new URLSearchParams(searchParams);
+              if (val) next.set('search', val);
+              else next.delete('search');
+              setSearchParams(next);
+            }}
+          />
+        </div>
+
         <div className={!isEmployee ? "grid grid-3" : "grid grid-2"}>
           {!isEmployee && (
             <div className="field">
@@ -395,7 +414,7 @@ export default function ContractsPage() {
           </div>
         </div>
 
-        {(employeeIdFilter || stateFilter || structureFilter) && (
+        {(employeeIdFilter || stateFilter || structureFilter || searchFilter) && (
           <div style={{ marginTop: 12 }}>
             <button
               className="btn btn-sm"
@@ -408,6 +427,7 @@ export default function ContractsPage() {
           </div>
         )}
       </Card>
+
 
       <div style={{ height: 20 }} />
 

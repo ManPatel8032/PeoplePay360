@@ -2,13 +2,14 @@
  * Payslip List (B7) — standalone filterable list of all payslips across payruns.
  * Respects scopeToSelf on the backend — employees see only their own.
  */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { api, qs, money } from '../../api.js';
-import { useApi, States, Table, Badge, empNumberColumn } from '../../components/ui.jsx';
+import { useApi, States, Table, Badge, empNumberColumn, SearchInput } from '../../components/ui.jsx';
 import PayslipDetail from './PayslipDetail.jsx';
 
 export default function PayslipList() {
   const [filters, setFilters] = useState({ payrun_id: '', employee_id: '', state: '' });
+  const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(null);
 
   const { data, loading, error, reload } = useApi(
@@ -16,6 +17,18 @@ export default function PayslipList() {
   );
 
   const set = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
+
+  const visible = useMemo(() => {
+    if (!data) return [];
+    if (!search.trim()) return data;
+    const q = search.trim().toLowerCase();
+    return data.filter((r) =>
+      r.employee_name?.toLowerCase().includes(q) ||
+      r.employee_number?.toLowerCase().includes(q) ||
+      r.payrun_name?.toLowerCase().includes(q) ||
+      r.department_name?.toLowerCase().includes(q)
+    );
+  }, [data, search]);
 
   if (selectedId) {
     return <PayslipDetail payslipId={selectedId} onBack={() => { setSelectedId(null); reload(); }} />;
@@ -45,6 +58,14 @@ export default function PayslipList() {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="grid grid-3">
           <div className="field">
+            <label>Search Payslips</label>
+            <SearchInput
+              placeholder="Search employee, number, or payrun..."
+              value={search}
+              onChange={setSearch}
+            />
+          </div>
+          <div className="field">
             <label>State</label>
             <select className="select" value={filters.state} onChange={set('state')}>
               <option value="">All states</option>
@@ -57,10 +78,11 @@ export default function PayslipList() {
         </div>
       </div>
 
-      <States loading={loading} error={error} empty={!data?.length}
+      <States loading={loading} error={error} empty={!visible?.length}
              emptyText="No payslips found" onRetry={reload}>
-        <Table columns={columns} rows={data} onRowClick={(r) => setSelectedId(r.id)} />
+        <Table columns={columns} rows={visible} onRowClick={(r) => setSelectedId(r.id)} />
       </States>
     </>
   );
 }
+

@@ -161,3 +161,102 @@ export const empNumberColumn = {
       ? <span className="mono">{r.employee_number}</span>
       : <span className="muted">—</span>,
 };
+
+/**
+ * Debounce a rapidly changing value by `delay` ms.
+ */
+export function useDebounce(value, delay = 300) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+/**
+ * Universal SearchInput with debounce, search icon, and instant clear button.
+ */
+export function SearchInput({
+  value: externalValue,
+  onChange,
+  onImmediateChange,
+  placeholder = 'Search...',
+  delay = 300,
+  className = '',
+  style = {},
+  id,
+  ...props
+}) {
+  const [internalValue, setInternalValue] = useState(externalValue ?? '');
+  const debounced = useDebounce(internalValue, delay);
+
+  // Synchronize when external value changes from outside (e.g. Reset button)
+  useEffect(() => {
+    if (externalValue !== undefined && externalValue !== internalValue) {
+      setInternalValue(externalValue);
+    }
+  }, [externalValue]);
+
+  // Notify parent of debounced change
+  useEffect(() => {
+    onChange?.(debounced);
+  }, [debounced, onChange]);
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setInternalValue(val);
+    onImmediateChange?.(val);
+  };
+
+  const handleClear = () => {
+    setInternalValue('');
+    onImmediateChange?.('');
+    onChange?.('');
+  };
+
+  return (
+    <div className={`search-input-wrap ${className}`} style={style}>
+      <svg
+        className="search-icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+      <input
+        type="text"
+        id={id}
+        className="input search-input"
+        placeholder={placeholder}
+        value={internalValue}
+        onChange={handleInputChange}
+        {...props}
+      />
+      {Boolean(internalValue) && (
+        <button
+          type="button"
+          className="search-clear-btn"
+          onClick={handleClear}
+          title="Clear search"
+          aria-label="Clear search"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+

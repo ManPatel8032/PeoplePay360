@@ -4,15 +4,15 @@
  */
 import { useState } from 'react';
 import { api, qs, money } from '../../api.js';
-import { useApi, States, Table, Badge } from '../../components/ui.jsx';
+import { useApi, States, Table, Badge, SearchInput } from '../../components/ui.jsx';
 import PayrunWizardModal from './PayrunWizardModal.jsx';
 
 export default function PayrunList({ onSelect }) {
   const [showWizard, setShowWizard] = useState(false);
-  const [filters, setFilters] = useState({ state: '', structure_id: '' });
+  const [filters, setFilters] = useState({ state: '', structure_id: '', search: '' });
 
   const { data, loading, error, reload } = useApi(
-    () => api.get(`/payruns${qs(filters)}`), [filters.state, filters.structure_id]
+    () => api.get(`/payruns${qs(filters)}`), [filters.state, filters.structure_id, filters.search]
   );
   const { data: structures } = useApi(() => api.get('/structures'), []);
 
@@ -41,6 +41,14 @@ export default function PayrunList({ onSelect }) {
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="grid grid-3">
           <div className="field">
+            <label>Search Payruns</label>
+            <SearchInput
+              placeholder="Search payrun name..."
+              value={filters.search}
+              onChange={(val) => setFilters((f) => ({ ...f, search: val }))}
+            />
+          </div>
+          <div className="field">
             <label>State</label>
             <select className="select" value={filters.state} onChange={set('state')}>
               <option value="">All states</option>
@@ -59,6 +67,7 @@ export default function PayrunList({ onSelect }) {
           </div>
         </div>
       </div>
+
 
       <States loading={loading} error={error} empty={!data?.length}
              emptyText="No payruns yet — create one with the wizard" onRetry={reload}>

@@ -2,9 +2,9 @@
  * Salary Structures (A5) — list with create/edit modal.
  * Shows rule count, employee count, and active/inactive toggle.
  */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { api } from '../../api.js';
-import { useApi, States, Table, Badge, Modal, Field } from '../../components/ui.jsx';
+import { useApi, States, Table, Badge, Modal, Field, SearchInput } from '../../components/ui.jsx';
 
 const empty = { name: '', code: '', active: true };
 
@@ -13,8 +13,19 @@ export default function SalaryStructures({ onSelect }) {
   const [form, setForm] = useState(empty);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
 
   const { data, loading, error: loadErr, reload } = useApi(() => api.get('/structures'), []);
+
+  const visible = useMemo(() => {
+    if (!data) return [];
+    if (!search.trim()) return data;
+    const q = search.trim().toLowerCase();
+    return data.filter((s) =>
+      s.name?.toLowerCase().includes(q) ||
+      s.code?.toLowerCase().includes(q)
+    );
+  }, [data, search]);
 
   const open = (row) => {
     setForm(row ? { name: row.name, code: row.code, active: row.active } : { ...empty });
@@ -77,9 +88,20 @@ export default function SalaryStructures({ onSelect }) {
         <button className="btn btn-primary" onClick={() => open(null)}>+ New Structure</button>
       </div>
 
-      <States loading={loading} error={loadErr} empty={!data?.length} onRetry={reload}>
-        <Table columns={columns} rows={data} onRowClick={(r) => onSelect ? onSelect(r) : open(r)} />
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ maxWidth: 350 }}>
+          <SearchInput
+            placeholder="Search structure name or code..."
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
+      </div>
+
+      <States loading={loading} error={loadErr} empty={!visible?.length} onRetry={reload}>
+        <Table columns={columns} rows={visible} onRowClick={(r) => onSelect ? onSelect(r) : open(r)} />
       </States>
+
 
       {editing && (
         <Modal title={editing.id ? 'Edit Structure' : 'New Structure'} onClose={() => setEditing(null)}>

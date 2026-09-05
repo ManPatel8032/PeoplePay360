@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Modal, Field, Alert } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Modal, Field, Alert, SearchInput } from '../../components/ui.jsx';
+
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -34,13 +35,25 @@ export default function SchedulesPage() {
   const [editingSchedule, setEditingSchedule] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [search, setSearch] = useState('');
 
   const { data: schedules, loading, error, reload } = useApi(() => api.get('/schedules'), []);
+
+  const visibleSchedules = useMemo(() => {
+    if (!schedules) return [];
+    if (!search.trim()) return schedules;
+    const q = search.trim().toLowerCase();
+    return schedules.filter((s) =>
+      s.name?.toLowerCase().includes(q) ||
+      s.schedule_type?.toLowerCase().includes(q)
+    );
+  }, [schedules, search]);
 
   // Form state
   const [formName, setFormName] = useState('');
   const [formType, setFormType] = useState('full_time');
   const [formLines, setFormLines] = useState([]);
+
 
   // Compute live weekly hours as lines change
   const liveWeeklyHours = useMemo(() => calculateTotalWeeklyHours(formLines), [formLines]);
@@ -211,11 +224,22 @@ export default function SchedulesPage() {
         </div>
       </div>
 
-      <States loading={loading} error={error} empty={!schedules?.length} onRetry={reload}>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ maxWidth: 350 }}>
+          <SearchInput
+            placeholder="Search schedules by name..."
+            value={search}
+            onChange={setSearch}
+          />
+        </div>
+      </div>
+
+      <States loading={loading} error={error} empty={!visibleSchedules?.length} onRetry={reload}>
         <Card pad={false}>
-          <Table columns={columns} rows={schedules || []} onRowClick={openEditModal} />
+          <Table columns={columns} rows={visibleSchedules} onRowClick={openEditModal} />
         </Card>
       </States>
+
 
       {/* Schedule Edit / Create Modal */}
       {modalOpen && (

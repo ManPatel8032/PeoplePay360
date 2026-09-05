@@ -8,7 +8,9 @@
 import { useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
-import { useApi, States, Card, Table, Badge, Field, Modal, Alert } from '../../components/ui.jsx';
+import { useApi, States, Card, Table, Badge, Field, Modal, Alert, SearchInput } from '../../components/ui.jsx';
+
+
 
 const ROLES = [
   { value: 'employee', label: 'Employee' },
@@ -173,10 +175,13 @@ export default function UsersPage() {
 
       <Card className="card" style={{ marginBottom: 16 }}>
         <div className="row">
-          <input
-            className="input" style={{ maxWidth: 300 }} placeholder="Search name, number, email…"
-            value={search} onChange={(e) => setSearch(e.target.value)}
+          <SearchInput
+            style={{ maxWidth: 300 }}
+            placeholder="Search name, number, email…"
+            value={search}
+            onChange={setSearch}
           />
+
           <select className="select" style={{ width: 'auto' }} value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="all">Everyone</option>
             <option value="with">Has a login</option>
