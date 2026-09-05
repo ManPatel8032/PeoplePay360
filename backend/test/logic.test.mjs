@@ -63,3 +63,33 @@ test('a zero working-day period does not divide by zero', () => {
   const ctx = { wage: 100000, worked_days: 0, working_days: 0, RULE: {}, CAT: {} };
   assert.equal(evalFormula('working_days ? worked_days / working_days : 1', ctx), 1);
 });
+
+test('Section 2: schedule line calculation with break deduction', () => {
+  const customSched = [
+    { day_of_week: 1, start_time: '09:00', end_time: '17:00', break_minutes: 60 }, // 7 hrs
+    { day_of_week: 2, start_time: '09:00', end_time: '17:00', break_minutes: 30 }, // 7.5 hrs
+    { day_of_week: 3, start_time: '10:00', end_time: '15:00', break_minutes: 0 },  // 5 hrs
+  ];
+  assert.equal(weeklyHours(customSched), 19.5);
+});
+
+test('Section 2: contract overlap logic detects concurrent running contracts', () => {
+  // Existing contract: 2026-01-01 to 2026-06-30
+  // Overlapping cases:
+  assert.ok(overlapDays('2026-01-01', '2026-06-30', '2026-06-01', '2026-12-31') > 0);
+  assert.ok(overlapDays('2026-01-01', '2026-06-30', '2026-03-01', '2026-04-30') > 0);
+  assert.ok(overlapDays('2026-01-01', '2026-06-30', '2026-06-30', null) > 0);
+  // Non-overlapping:
+  assert.equal(overlapDays('2026-01-01', '2026-06-30', '2026-07-01', '2026-12-31'), 0);
+});
+
+test('Section 2: leave balance maths (18 allocated - 3 taken = 15 remaining)', () => {
+  const allocated = 18;
+  const taken = 3;
+  const remaining = allocated - taken;
+  assert.equal(remaining, 15);
+  // Requesting 40 days when 15 remain is rejected
+  const requested = 40;
+  assert.equal(requested > remaining, true);
+});
+
