@@ -78,17 +78,42 @@ export default function TimeOffPage() {
   // Calculate duration from date_from and date_to
   const calculateDays = (from, to) => {
     if (!from || !to || to < from) return 1;
-    const d1 = new Date(from);
-    const d2 = new Date(to);
-    const diffTime = Math.abs(d2 - d1);
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    const [y1, m1, d1] = from.split('-').map(Number);
+    const [y2, m2, d2] = to.split('-').map(Number);
+    const date1 = Date.UTC(y1, m1 - 1, d1);
+    const date2 = Date.UTC(y2, m2 - 1, d2);
+    const diffDays = Math.round((date2 - date1) / (1000 * 60 * 60 * 24));
+    return Math.max(1, diffDays + 1);
+  };
+
+  // Calculate date_to from date_from and duration (e.g. 1 day starting 2026-09-01 ends 2026-09-01)
+  const calculateDateTo = (from, duration) => {
+    if (!from) return TODAY;
+    const dur = parseFloat(duration);
+    if (isNaN(dur) || dur <= 0) return from;
+    const [y, m, d] = from.split('-').map(Number);
+    if (!y || !m || !d) return from;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const daysToAdd = Math.max(0, Math.ceil(dur) - 1);
+    dt.setUTCDate(dt.getUTCDate() + daysToAdd);
+    return dt.toISOString().slice(0, 10);
   };
 
   const handleReqFieldChange = (field, val) => {
     const next = { ...reqForm, [field]: val };
-    if (field === 'date_from' || field === 'date_to') {
-      const dur = calculateDays(next.date_from, next.date_to);
-      next.duration = String(dur);
+    if (field === 'duration') {
+      if (next.date_from && val && !isNaN(val) && Number(val) > 0) {
+        next.date_to = calculateDateTo(next.date_from, val);
+      }
+    } else if (field === 'date_from') {
+      if (val) {
+        next.date_to = calculateDateTo(val, next.duration);
+      }
+    } else if (field === 'date_to') {
+      if (next.date_from && val) {
+        const dur = calculateDays(next.date_from, val);
+        next.duration = String(dur);
+      }
     }
     setReqForm(next);
   };
