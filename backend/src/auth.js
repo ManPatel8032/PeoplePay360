@@ -47,8 +47,8 @@ export async function attachUser(req, _res, next) {
       }
     }
 
+    // Dev/transitional fallback: support x-user-id header if present
     if (process.env.NODE_ENV !== 'production') {
-      // Dev/transitional fallback: support x-user-id header if present
       const id = Number(req.header('x-user-id')) || 0;
       if (id) {
         const user = await one(
