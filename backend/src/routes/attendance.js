@@ -61,14 +61,17 @@ export async function getEmployeeFullDayHours(employeeId, checkInDate = new Date
 
 /**
  * Derive attendance status from worked hours:
- * - > max(fullDayHours + 1, 9): 'overtime'
+ * - > fullDayHours + 1: 'overtime'
  * - >= fullDayHours: 'present' (full day amount of work reached)
  * - > 4 and < fullDayHours: 'half_day' (half day is > 4 hrs and less than full day amount of work)
  * - <= 4 hours: 'absent' (less than or equal to 4 hours is under half day threshold)
  */
 export function deriveAttendanceStatus(h, defaultStatus = 'present', fullDayHours = 8) {
   const fullDay = Number(fullDayHours) > 0 ? Number(fullDayHours) : 8;
-  const otThreshold = Math.max(fullDay + 1, 9);
+  // One hour of grace over the employee's OWN scheduled day. The old floor of 9
+  // hours was a full-time assumption: someone rostered for four hours had to
+  // work more than double before any of it counted as overtime.
+  const otThreshold = fullDay + 1;
   if (h > otThreshold) return 'overtime';
   if (h >= fullDay) {
     return defaultStatus === 'overtime' || defaultStatus === 'half_day' || defaultStatus === 'absent'

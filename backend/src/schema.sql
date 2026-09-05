@@ -225,6 +225,15 @@ CREATE TABLE IF NOT EXISTS payslips (
 CREATE INDEX IF NOT EXISTS idx_slip_emp ON payslips(employee_id, period_start DESC);
 CREATE INDEX IF NOT EXISTS idx_slip_run ON payslips(payrun_id);
 
+-- A payroll period runs forwards. Added separately from CREATE TABLE so that
+-- databases created before this rule pick it up on the next boot.
+DO $do$ BEGIN
+  ALTER TABLE payruns  ADD CONSTRAINT payruns_period_order  CHECK (period_end >= period_start);
+EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+DO $do$ BEGIN
+  ALTER TABLE payslips ADD CONSTRAINT payslips_period_order CHECK (period_end >= period_start);
+EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+
 CREATE TABLE IF NOT EXISTS payslip_lines (
   id         SERIAL PRIMARY KEY,
   payslip_id INTEGER NOT NULL REFERENCES payslips(id) ON DELETE CASCADE,

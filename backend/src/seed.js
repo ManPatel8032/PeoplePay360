@@ -75,25 +75,29 @@ async function main() {
   const regular = (await one("INSERT INTO salary_structures (name,code) VALUES ('Regular Salary','REG') RETURNING id")).id;
   const contractStruct = (await one("INSERT INTO salary_structures (name,code) VALUES ('Contractor Salary','CON') RETURNING id")).id;
 
+  // Days not worked are charged once, by the Loss of Pay rule. The earning
+  // rules used to prorate by worked/working days AND the LOP rule deducted the
+  // same days again, so an absence cost roughly twice what it should — and a
+  // fully absent month produced a negative net salary.
   const ruleRows = [
     // structure, name, code, category, seq, type, amount, percent_base, formula
-    [regular, 'Basic Salary',            'BASIC', 'BASIC', 10,  'formula', 0,  null,    'wage * 0.5 * (working_days ? worked_days / working_days : 1)'],
+    [regular, 'Basic Salary',            'BASIC', 'BASIC', 10,  'formula', 0,  null,    'wage * 0.5'],
     [regular, 'House Rent Allowance',    'HRA',   'ALW',   20,  'percent', 40, 'BASIC', null],
     [regular, 'Conveyance Allowance',    'CONV',  'ALW',   30,  'fixed',   1600, null,  null],
     [regular, 'Medical Allowance',       'MED',   'ALW',   40,  'fixed',   1250, null,  null],
-    [regular, 'Special Allowance',       'SPEC',  'ALW',   50,  'formula', 0,  null,    'Math.max(0, wage * (working_days ? worked_days / working_days : 1) - RULE.BASIC - RULE.HRA - RULE.CONV - RULE.MED)'],
-    [regular, 'Overtime Pay',            'OT',    'ALW',   60,  'formula', 0,  null,    'overtime_hours * (wage / 173)'],
+    [regular, 'Special Allowance',       'SPEC',  'ALW',   50,  'formula', 0,  null,    'Math.max(0, wage - RULE.BASIC - RULE.HRA - RULE.CONV - RULE.MED)'],
+    [regular, 'Overtime Pay',            'OT',    'ALW',   60,  'formula', 0,  null,    'overtime_hours * hourly_rate'],
     [regular, 'Gross Salary',            'GROSS', 'GROSS', 100, 'formula', 0,  null,    'CAT.BASIC + CAT.ALW'],
     [regular, 'Provident Fund (12%)',    'PF',    'DED',   110, 'percent', 12, 'BASIC', null],
     [regular, 'Professional Tax',        'PT',    'DED',   120, 'fixed',   200, null,   null],
     [regular, 'Income Tax (TDS)',        'TDS',   'DED',   130, 'formula', 0,  null,    'RULE.GROSS > 50000 ? RULE.GROSS * 0.1 : RULE.GROSS * 0.05'],
-    [regular, 'Loss of Pay',             'LOP',   'DED',   140, 'formula', 0,  null,    'working_days ? (wage / working_days) * unpaid_leave_days : 0'],
-    [regular, 'Net Salary',              'NET',   'NET',   200, 'formula', 0,  null,    'RULE.GROSS - CAT.DED'],
+    [regular, 'Loss of Pay',             'LOP',   'DED',   140, 'formula', 0,  null,    'working_days ? Math.min(RULE.GROSS, (wage / working_days) * (unpaid_leave_days + absent_days)) : 0'],
+    [regular, 'Net Salary',              'NET',   'NET',   200, 'formula', 0,  null,    'Math.max(0, RULE.GROSS - CAT.DED)'],
 
     [contractStruct, 'Contract Fee',     'BASIC', 'BASIC', 10,  'formula', 0,  null,    'wage * (working_days ? worked_days / working_days : 1)'],
     [contractStruct, 'Gross',            'GROSS', 'GROSS', 100, 'formula', 0,  null,    'CAT.BASIC'],
     [contractStruct, 'TDS (10%)',        'TDS',   'DED',   110, 'percent', 10, 'GROSS', null],
-    [contractStruct, 'Net Payable',      'NET',   'NET',   200, 'formula', 0,  null,    'RULE.GROSS - CAT.DED'],
+    [contractStruct, 'Net Payable',      'NET',   'NET',   200, 'formula', 0,  null,    'Math.max(0, RULE.GROSS - CAT.DED)'],
   ];
   for (const r of ruleRows)
     await query(
@@ -301,8 +305,25 @@ async function main() {
     [byName['Aarav Sharma'], types.COMP, yearStart, yearEnd]
   );
 
-  // ---------- attendance: last 6 months of working days ----------
+  // ---------- attendance: last 6 months, following each roster ----------
+  // Hours are generated from the employee's OWN schedule. Giving a part-timer
+  // nine-hour days used to be invisible; now that overtime is measured against
+  // the roster instead of a hard-coded eight hours, it would pay an intern more
+  // in overtime than in wage.
   console.log('seeding attendance...');
+  const rosters = {};
+  for (const schedId of [std, part, flex]) {
+    const rows = await query('SELECT day_of_week, start_time, end_time, break_minutes FROM schedule_lines WHERE schedule_id = $1', [schedId]);
+    rosters[schedId] = new Map(rows.map((r) => {
+      const [sh, sm] = r.start_time.split(':').map(Number);
+      const [eh, em] = r.end_time.split(':').map(Number);
+      return [r.day_of_week, {
+        startHour: sh + sm / 60,
+        hours: (eh + em / 60) - (sh + sm / 60) - (r.break_minutes || 0) / 60,
+      }];
+    }));
+  }
+
   const attRows = [];
   for (let m = 5; m >= 0; m--) {
     const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - m, 1));
@@ -311,16 +332,20 @@ async function main() {
     const last = new Date(end + 'T00:00:00Z');
     while (cur <= last) {
       const dow = cur.getUTCDay();
-      if (dow !== 0 && dow !== 6 && cur <= today) {
+      if (cur <= today) {
         const day = cur.toISOString().slice(0, 10);
         for (let i = 0; i < empIds.length; i++) {
+          const shift = rosters[people[i].sched]?.get(dow);
+          if (!shift) continue;                                  // not a working day for them
           if (Math.random() < 0.06) continue;                    // absent / on leave
-          const inH = pick([9, 9, 9, 9, 10], rndInt(0, 4));
-          const inM = rndInt(0, 55);
-          const late = inH >= 10 || inM > 30;
+          const late = Math.random() < 0.18;
+          const startHour = Math.floor(shift.startHour);
+          const inM = late ? rndInt(31, 55) : rndInt(0, 25);
           const overtime = Math.random() < 0.12;
-          const dur = overtime ? rnd(9.5, 11) : rnd(7.5, 9);
-          const checkIn = `${day}T${String(inH).padStart(2, '0')}:${String(inM).padStart(2, '0')}:00Z`;
+          const dur = overtime
+            ? shift.hours + rnd(1.5, 3)
+            : Math.max(1, shift.hours + rnd(-0.5, 0.5));
+          const checkIn = `${day}T${String(startHour).padStart(2, '0')}:${String(inM).padStart(2, '0')}:00Z`;
           const noCheckout = Math.random() < 0.03;
           const checkOut = noCheckout ? null : new Date(new Date(checkIn).getTime() + dur * 3600000).toISOString();
           attRows.push([empIds[i], checkIn, checkOut,

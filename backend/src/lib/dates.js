@@ -15,6 +15,33 @@ export function eachDay(from, to) {
 
 export const daysBetween = (from, to) => eachDay(from, to).length;
 
+export function addDays(iso, n) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * How many months a date range is worth, counted month by month.
+ *
+ * A monthly wage buys a month, so a period must be divided by the length of the
+ * month each of its days belongs to. Dividing the whole span by one month's
+ * length — the month the period happens to start in — overpays whenever the
+ * period crosses into a longer or shorter month.
+ */
+export function monthFraction(from, to) {
+  let total = 0;
+  let cursor = from;
+  while (cursor <= to) {
+    const d = new Date(cursor + 'T00:00:00Z');
+    const { start, end } = monthBounds(d.getUTCFullYear(), d.getUTCMonth() + 1);
+    const sliceEnd = end < to ? end : to;
+    total += daysBetween(cursor, sliceEnd) / daysBetween(start, end);
+    cursor = addDays(sliceEnd, 1);
+  }
+  return total;
+}
+
 /** Overlap of two closed date ranges, in days. b_end may be null (open ended). */
 export function overlapDays(aStart, aEnd, bStart, bEnd) {
   const s = aStart > bStart ? aStart : bStart;
@@ -40,6 +67,16 @@ export function weeklyHours(lines) {
     (sum, l) => sum + Math.max(0, HHMM(l.end_time) - HHMM(l.start_time) - (l.break_minutes || 0) / 60),
     0
   );
+}
+
+/** Scheduled hours for each weekday of a pattern, keyed by day_of_week. */
+export function hoursByDayOfWeek(lines) {
+  const map = new Map();
+  for (const l of lines) {
+    const hours = Math.max(0, HHMM(l.end_time) - HHMM(l.start_time) - (l.break_minutes || 0) / 60);
+    map.set(l.day_of_week, (map.get(l.day_of_week) || 0) + hours);
+  }
+  return map;
 }
 
 /** Number of scheduled working days in [from,to] for a weekly pattern. */
