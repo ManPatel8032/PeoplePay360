@@ -62,7 +62,7 @@ export default function PayrunDetail({ payrunId, onBack }) {
   }
 
   const actionDef = run ? ACTIONS[run.state] : null;
-  const { can } = useAuth();
+  const { user, can } = useAuth();
   const canRunPayroll = can('payruns', 'write') !== 'none';
   const canDeleteRun = can('payruns', 'delete') !== 'none' && run && ['draft', 'computed'].includes(run.state);
   const canDeleteSlip = can('payslips', 'delete') !== 'none' && run && ['draft', 'computed'].includes(run.state);
@@ -117,25 +117,29 @@ export default function PayrunDetail({ payrunId, onBack }) {
       key: 'recompute',
       label: '',
       align: 'right',
-      render: (r) => (
-        <button
-          type="button"
-          className="btn btn-sm"
-          style={{ padding: '2px 8px', minHeight: 24, fontSize: 12 }}
-          title="Recompute this payslip"
-          onClick={async (e) => {
-            e.stopPropagation();
-            try {
-              await api.post(`/payslips/${r.id}/compute`);
-              reload();
-            } catch (err) {
-              setActionErr(err.message);
-            }
-          }}
-        >
-          ↻
-        </button>
-      ),
+      render: (r) => {
+        const isOwn = user?.employee_id && r.employee_id === user.employee_id && user?.role !== 'admin';
+        if (isOwn) return null;
+        return (
+          <button
+            type="button"
+            className="btn btn-sm"
+            style={{ padding: '2px 8px', minHeight: 24, fontSize: 12 }}
+            title="Recompute this payslip"
+            onClick={async (e) => {
+              e.stopPropagation();
+              try {
+                await api.post(`/payslips/${r.id}/compute`);
+                reload();
+              } catch (err) {
+                setActionErr(err.message);
+              }
+            }}
+          >
+            ↻
+          </button>
+        );
+      },
     }] : []),
     ...(canDeleteSlip ? [{
       key: 'remove',

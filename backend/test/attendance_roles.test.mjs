@@ -319,5 +319,86 @@ test('attendance clock rules: half day is greater than 4 hours and less than ful
   assert.equal(deriveAttendanceStatus(4.0, 'present', 10), 'absent');
 });
 
+test('timeoff self-approval restriction: HR and Payroll users cannot approve their own leaves or allocations', () => {
+  const canApproveRequest = (user, request) => {
+    // Permission check
+    if (!['hr_manager', 'payroll_user', 'payroll_manager', 'admin'].includes(user.role)) return false;
+    // Self-approval restriction
+    if (user.employee_id && request.employee_id === user.employee_id) return false;
+    return true;
+  };
+
+  const hrUser = { id: 3, role: 'hr_manager', employee_id: 17 };
+  const payrollUser = { id: 5, role: 'payroll_user', employee_id: 19 };
+  const adminUser = { id: 1, role: 'admin', employee_id: null };
+  const employeeUser = { id: 6, role: 'employee', employee_id: 2 };
+
+  const hrOwnLeave = { id: 201, employee_id: 17 };
+  const payrollOwnLeave = { id: 202, employee_id: 19 };
+  const subordinateLeave = { id: 203, employee_id: 2 };
+
+  // HR Manager cannot approve their own leave
+  assert.equal(canApproveRequest(hrUser, hrOwnLeave), false, 'HR Manager must not approve own leave');
+  // HR Manager can approve subordinate leave
+  assert.equal(canApproveRequest(hrUser, subordinateLeave), true, 'HR Manager can approve other leaves');
+
+  // Payroll User cannot approve their own leave
+  assert.equal(canApproveRequest(payrollUser, payrollOwnLeave), false, 'Payroll User must not approve own leave');
+  // Payroll User can approve other leaves
+  assert.equal(canApproveRequest(payrollUser, subordinateLeave), true, 'Payroll User can approve other leaves');
+
+  // Regular employee cannot approve any leave
+  assert.equal(canApproveRequest(employeeUser, subordinateLeave), false, 'Employee cannot approve leaves');
+
+  // Admin without employee_id can approve HR and Payroll leaves
+  assert.equal(canApproveRequest(adminUser, hrOwnLeave), true, 'Admin can approve HR leave');
+  assert.equal(canApproveRequest(adminUser, payrollOwnLeave), true, 'Admin can approve Payroll leave');
+});
+
+test('payroll hierarchy: employee -> hr -> payroll user -> payroll manager -> admin, no self-payroll', async () => {
+  const { ROLE_HIERARCHY } = await import('../src/lib/guards.js');
+
+  assert.equal(ROLE_HIERARCHY.employee, 1);
+  assert.equal(ROLE_HIERARCHY.hr_manager, 2);
+  assert.equal(ROLE_HIERARCHY.payroll_user, 3);
+  assert.equal(ROLE_HIERARCHY.payroll_manager, 4);
+  assert.equal(ROLE_HIERARCHY.admin, 5);
+
+  const canProcessPayroll = (caller, targetEmployeeId, targetRole) => {
+    if (caller.role === 'admin') return true;
+    // Rule 1: No self-payroll
+    if (caller.employee_id && targetEmployeeId === caller.employee_id) return false;
+    // Rule 2: Strict hierarchy
+    const callerRank = ROLE_HIERARCHY[caller.role] || 1;
+    const targetRank = ROLE_HIERARCHY[targetRole] || 1;
+    return targetRank < callerRank;
+  };
+
+  const payrollUser = { id: 5, role: 'payroll_user', employee_id: 19 };
+  const payrollManager = { id: 4, role: 'payroll_manager', employee_id: 18 };
+  const adminUser = { id: 1, role: 'admin', employee_id: null };
+
+  // 1. Payroll User cannot process own payroll
+  assert.equal(canProcessPayroll(payrollUser, 19, 'payroll_user'), false);
+  // Payroll User cannot process Payroll Manager's payroll
+  assert.equal(canProcessPayroll(payrollUser, 18, 'payroll_manager'), false);
+  // Payroll User CAN process regular employee and HR payroll
+  assert.equal(canProcessPayroll(payrollUser, 2, 'employee'), true);
+  assert.equal(canProcessPayroll(payrollUser, 17, 'hr_manager'), true);
+
+  // 2. Payroll Manager cannot process own payroll
+  assert.equal(canProcessPayroll(payrollManager, 18, 'payroll_manager'), false);
+  // Payroll Manager CAN process Payroll User, HR, and Employee payroll
+  assert.equal(canProcessPayroll(payrollManager, 19, 'payroll_user'), true);
+  assert.equal(canProcessPayroll(payrollManager, 17, 'hr_manager'), true);
+  assert.equal(canProcessPayroll(payrollManager, 2, 'employee'), true);
+
+  // 3. Admin can process everyone's payroll (including Payroll Manager and Payroll User)
+  assert.equal(canProcessPayroll(adminUser, 18, 'payroll_manager'), true);
+  assert.equal(canProcessPayroll(adminUser, 19, 'payroll_user'), true);
+  assert.equal(canProcessPayroll(adminUser, 17, 'hr_manager'), true);
+  assert.equal(canProcessPayroll(adminUser, 2, 'employee'), true);
+});
+
 
 

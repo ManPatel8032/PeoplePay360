@@ -133,3 +133,76 @@ export function rejected(res, guard) {
   res.status(guard.status).json(guard.body);
   return true;
 }
+
+export const ROLE_HIERARCHY = {
+  employee: 1,
+  hr_manager: 2,
+  payroll_user: 3,
+  payroll_manager: 4,
+  admin: 5,
+};
+
+/**
+ * Rule 3 — Hierarchy & Self-Payroll restriction.
+ * An employee (even if payroll_user or payroll_manager) cannot create or run their own payroll.
+ * Their payroll must be processed by an Admin (or strictly higher in hierarchy:
+ * employee -> hr -> payroll_user -> payroll_manager -> admin).
+ */
+export async function blockPayrollCreation(req, targetEmployeeId) {
+  if (isAdmin(req)) return null;
+
+  const callerEmpId = req.user?.employee_id;
+  const callerRole = req.user?.role || 'employee';
+  const callerRank = ROLE_HIERARCHY[callerRole] || 1;
+
+  // 1. Self-payroll restriction
+  if (callerEmpId && Number(targetEmployeeId) === Number(callerEmpId)) {
+    return {
+      status: 403,
+      body: {
+        error: 'You cannot create or process your own payroll. Your payroll must be processed by an Admin.',
+        rule: 'self_payroll_forbidden',
+      },
+    };
+  }
+
+  // 2. Hierarchy check
+  const targetUser = await one(
+    'SELECT role FROM users WHERE employee_id = $1 AND is_active = TRUE ORDER BY id LIMIT 1',
+    [targetEmployeeId]
+  );
+  const targetRole = targetUser?.role || 'employee';
+  const targetRank = ROLE_HIERARCHY[targetRole] || 1;
+
+  if (targetRank >= callerRank) {
+    const emp = await one('SELECT name FROM employees WHERE id = $1', [targetEmployeeId]);
+    const empName = emp?.name || 'This employee';
+    if (targetRole === 'payroll_manager') {
+      return {
+        status: 403,
+        body: {
+          error: `${empName} is a Payroll Manager. Their payroll must be processed by an Admin.`,
+          rule: 'payroll_hierarchy_restriction',
+        },
+      };
+    }
+    if (targetRole === 'payroll_user') {
+      return {
+        status: 403,
+        body: {
+          error: `${empName} is a Payroll User. Their payroll must be processed by a Payroll Manager or Admin.`,
+          rule: 'payroll_hierarchy_restriction',
+        },
+      };
+    }
+    return {
+      status: 403,
+      body: {
+        error: `You cannot process payroll for ${empName} (${targetRole.replace('_', ' ')}). It must be processed by a higher authority or Admin.`,
+        rule: 'payroll_hierarchy_restriction',
+      },
+    };
+  }
+
+  return null;
+}

@@ -1,8 +1,7 @@
 /** Salary structures & rules, Payrun wizard, Payslips, PDF, bulk email (A5, A6, B5-B8). */
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
-import { can } from '../auth.js';
-import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
+import { employeeScopeFilter, canSeeEmployee, isAdmin, blockPayrollCreation, ROLE_HIERARCHY } from '../lib/guards.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { computePayslip, getPayslip, contractForPeriod, periodStats } from '../lib/payroll.js';
 import { validateFormula } from '../lib/formula.js';
@@ -148,6 +147,7 @@ payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
     `SELECT e.id, e.name, e.employee_type, e.bank_account, d.name AS department_name,
             c.id AS contract_id, c.name AS contract_name, c.wage, c.end_date AS contract_end,
             c.structure_id, st.name AS structure_name,
+            (SELECT u.role FROM users u WHERE u.employee_id = e.id AND u.is_active = TRUE ORDER BY u.id LIMIT 1) AS user_role,
             -- Overlap, not an exact period match: paid for 1-31 Aug rules out 15-31 Aug.
             (SELECT COUNT(*)::int FROM payslips ps
               WHERE ps.employee_id = e.id AND ps.state <> 'cancelled'
@@ -171,17 +171,41 @@ payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
   );
 
   res.json({
-    data: rows.map((r) => ({
-      ...r,
-      eligible: !!r.contract_id && r.existing_payslips === 0,
-      blockers: [
+    data: rows.map((r) => {
+      let hierarchyBlocker = null;
+      if (!isAdmin(req)) {
+        const callerEmpId = req.user?.employee_id;
+        const callerRank = ROLE_HIERARCHY[req.user?.role] || 1;
+        const targetRank = ROLE_HIERARCHY[r.user_role || 'employee'] || 1;
+
+        if (callerEmpId && r.id === callerEmpId) {
+          hierarchyBlocker = 'You cannot create your own payroll (Admin only)';
+        } else if (targetRank >= callerRank) {
+          if (r.user_role === 'payroll_manager') {
+            hierarchyBlocker = 'Payroll Manager payroll must be processed by an Admin';
+          } else if (r.user_role === 'payroll_user') {
+            hierarchyBlocker = 'Payroll User payroll must be processed by a Payroll Manager or Admin';
+          } else {
+            hierarchyBlocker = `Cannot process payroll for ${r.user_role?.replace('_', ' ') || 'this role'} (Admin only)`;
+          }
+        }
+      }
+
+      const blockers = [
         !r.contract_id && 'No contract for this period',
         r.existing_payslips > 0 && `Already payrolled for ${r.overlapping_periods}`,
-      ].filter(Boolean),
-      warnings: [
-        !r.bank_account && 'Missing bank details',
-      ].filter(Boolean),
-    })),
+        hierarchyBlocker,
+      ].filter(Boolean);
+
+      return {
+        ...r,
+        eligible: !!r.contract_id && r.existing_payslips === 0 && !hierarchyBlocker,
+        blockers,
+        warnings: [
+          !r.bank_account && 'Missing bank details',
+        ].filter(Boolean),
+      };
+    }),
   });
 }));
 
@@ -194,6 +218,16 @@ payruns.post('/wizard', can('payruns', 'write'), ah(async (req, res) => {
     return res.status(400).json({ error: 'Period end must be on or after period start' });
   if (!employee_ids.length)
     return res.status(400).json({ error: 'Select at least one employee' });
+
+  // Hierarchy and Self-Payroll Guard
+  if (!isAdmin(req)) {
+    for (const empId of employee_ids) {
+      const blocked = await blockPayrollCreation(req, empId);
+      if (blocked) {
+        return res.status(blocked.status).json(blocked.body);
+      }
+    }
+  }
 
   // Nobody may be paid twice for the same day. Refused here rather than left to
   // a warning at validation time, because by then the payslips already exist.
@@ -266,6 +300,18 @@ payruns.post('/:id/compute', can('payruns', 'write'), ah(async (req, res) => {
   if (['validated', 'paid'].includes(run.state))
     return res.status(400).json({ error: `Cannot compute a ${run.state} payrun` });
 
+  if (!isAdmin(req)) {
+    const slips = await query("SELECT employee_id FROM payslips WHERE payrun_id = $1 AND state <> 'cancelled'", [run.id]);
+    for (const s of slips) {
+      const blocked = await blockPayrollCreation(req, s.employee_id);
+      if (blocked) {
+        return res.status(blocked.status).json({
+          error: `Cannot compute payrun: ${blocked.body.error}`,
+        });
+      }
+    }
+  }
+
   const slips = await query('SELECT id FROM payslips WHERE payrun_id = $1', [run.id]);
   for (const s of slips) await computePayslip(s.id);
   await query("UPDATE payruns SET state='computed' WHERE id=$1", [run.id]);
@@ -279,6 +325,17 @@ payruns.post('/:id/validate', can('payruns', 'write'), ah(async (req, res) => {
   if (run.state === 'draft') return res.status(400).json({ error: 'Compute the payrun first' });
   if (['validated', 'paid'].includes(run.state))
     return res.status(400).json({ error: `Payrun is already ${run.state}` });
+
+  if (!isAdmin(req)) {
+    for (const p of run.payslips) {
+      const blocked = await blockPayrollCreation(req, p.employee_id);
+      if (blocked) {
+        return res.status(blocked.status).json({
+          error: `Cannot validate payrun: ${blocked.body.error}`,
+        });
+      }
+    }
+  }
 
   let blocking = run.payslips.flatMap((p) =>
     (p.warnings || []).filter((w) => w.level === 'error').map((w) => `${p.employee_name}: ${w.message}`)
@@ -312,6 +369,19 @@ payruns.post('/:id/mark-paid', can('payruns', 'write'), ah(async (req, res) => {
   const run = await one('SELECT * FROM payruns WHERE id = $1', [req.params.id]);
   if (!run) return res.status(404).json({ error: 'Not found' });
   if (run.state !== 'validated') return res.status(400).json({ error: 'Validate the payrun first' });
+
+  if (!isAdmin(req)) {
+    const slips = await query("SELECT employee_id FROM payslips WHERE payrun_id = $1 AND state <> 'cancelled'", [run.id]);
+    for (const s of slips) {
+      const blocked = await blockPayrollCreation(req, s.employee_id);
+      if (blocked) {
+        return res.status(blocked.status).json({
+          error: `Cannot mark payrun paid: ${blocked.body.error}`,
+        });
+      }
+    }
+  }
+
   await tx(async (c) => {
     await c.query("UPDATE payslips SET state='paid' WHERE payrun_id=$1 AND state='validated'", [run.id]);
     await c.query("UPDATE payruns SET state='paid' WHERE id=$1", [run.id]);
@@ -383,6 +453,14 @@ payslips.get('/:id', can('payslips', 'read'), ah(async (req, res) => {
 }));
 
 payslips.post('/:id/compute', can('payslips', 'write'), ah(async (req, res) => {
+  const slip = await getPayslip(req.params.id);
+  if (!slip) return res.status(404).json({ error: 'Not found' });
+
+  if (!isAdmin(req)) {
+    const blocked = await blockPayrollCreation(req, slip.employee_id);
+    if (blocked) return res.status(blocked.status).json(blocked.body);
+  }
+
   res.json({ data: await computePayslip(req.params.id) });
 }));
 
