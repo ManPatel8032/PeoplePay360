@@ -60,7 +60,7 @@ contracts.get('/', can('contracts', 'read'), ah(async (req, res) => {
   }
   if (search) {
     params.push(`%${search}%`);
-    where.push(`(c.name ILIKE $${params.length} OR e.name ILIKE $${params.length})`);
+    where.push(`(c.name ILIKE $${params.length} OR e.name ILIKE $${params.length} OR e.employee_number ILIKE $${params.length})`);
   }
 
   const sql = `${CONTRACT_SQL}${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY c.start_date DESC`;

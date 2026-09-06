@@ -182,7 +182,7 @@ attendance.get('/', can('attendance', 'read'), ah(async (req, res) => {
   }
   if (search) {
     params.push(`%${search}%`);
-    where.push(`e.name ILIKE $${params.length}`);
+    where.push(`(e.name ILIKE $${params.length} OR e.employee_number ILIKE $${params.length} OR d.name ILIKE $${params.length})`);
   }
 
   // Missing-checkout total over the same scoped pool, so the banner never

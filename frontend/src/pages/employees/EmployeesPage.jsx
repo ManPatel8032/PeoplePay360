@@ -48,7 +48,7 @@ export default function EmployeesPage() {
   const filteredEmployees = useMemo(() => {
     let result = rawEmployees;
 
-    if (search.trim()) {
+    if (search?.trim()) {
       const q = search.toLowerCase().trim();
       result = result.filter(
         (e) =>

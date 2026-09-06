@@ -284,8 +284,10 @@ export function Modal({ title, onClose, children, width = 560 }) {
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgb(15 23 42 / .45)', zIndex: 50,
-               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+      style={{
+        position:   'fixed', inset: 0, background: 'rgb(15 23 42 / .45)', zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16
+      }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -316,26 +318,42 @@ export const empNumberColumn = {
 };
 
 /**
- * Debounce a rapidly changing value by `delay` ms.
+ * Debounce function utility with cancel() and flush() methods.
+ * Single reusable debounce implementation throughout the project.
  */
-export function useDebounce(value, delay = 300) {
-  const [debouncedValue, setDebouncedValue] = useState(value);
+export function debounce(callback, delay = 300) {
+  let timeoutId = null;
+  let lastArgs = null;
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
+  const debounced = (...args) => {
+    lastArgs = args;
+    clearTimeout(timeoutId);
+
+    timeoutId = setTimeout(() => {
+      callback(...args);
+      timeoutId = null;
     }, delay);
+  };
 
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
+  debounced.cancel = () => {
+    clearTimeout(timeoutId);
+    timeoutId = null;
+  };
 
-  return debouncedValue;
+  debounced.flush = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+      if (lastArgs) callback(...lastArgs);
+    }
+  };
+
+  return debounced;
 }
 
 /**
- * Universal SearchInput with debounce, search icon, and instant clear button.
+ * Universal SearchInput with debounce, search icon,
+ * and instant clear button.
  */
 export function SearchInput({
   value: externalValue,
@@ -349,47 +367,82 @@ export function SearchInput({
   ...props
 }) {
   const [internalValue, setInternalValue] = useState(externalValue ?? '');
-  const debounced = useDebounce(internalValue, delay);
+
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  const isMountedRef = useRef(false);
+
   const lastNotifiedRef = useRef(externalValue ?? '');
+  const prevExternalValueRef = useRef(externalValue);
 
-  // Synchronize when external value changes from outside (e.g. Reset button)
-  useEffect(() => {
-    if (externalValue !== undefined && externalValue !== internalValue) {
-      setInternalValue(externalValue);
-      lastNotifiedRef.current = externalValue;
-    }
-  }, [externalValue]);
+  // Stable debounced search function using the shared debounce() utility
+  const debouncedSearch = useMemo(
+    () =>
+      debounce((value) => {
+        lastNotifiedRef.current = value;
+        onChangeRef.current?.(value);
+      }, delay),
+    [delay]
+  );
 
-  // Notify parent of debounced change only when debounced actually changes
+  // Sync external value changes (e.g. Reset Filters button, programmatic reset)
   useEffect(() => {
-    if (!isMountedRef.current) {
-      isMountedRef.current = true;
-      return;
+    if (externalValue !== prevExternalValueRef.current) {
+      prevExternalValueRef.current = externalValue;
+      const normalized = externalValue ?? '';
+      // Only sync if the change came from the outside, not from our own debounced notification
+      if (normalized !== lastNotifiedRef.current) {
+        debouncedSearch.cancel();
+        setInternalValue(normalized);
+        lastNotifiedRef.current = normalized;
+      }
     }
-    if (debounced !== lastNotifiedRef.current) {
-      lastNotifiedRef.current = debounced;
-      onChangeRef.current?.(debounced);
-    }
-  }, [debounced]);
+  }, [externalValue, debouncedSearch]);
+
+  // Cleanup debounce timer when component unmounts
+  useEffect(() => {
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [debouncedSearch]);
 
   const handleInputChange = (e) => {
     const val = e.target.value;
+
     setInternalValue(val);
+
+    // Immediate callback — runs on every keystroke
     onImmediateChange?.(val);
+
+    // Debounced callback — runs after user stops typing
+    debouncedSearch(val);
   };
 
   const handleClear = () => {
+    debouncedSearch.cancel();
+
     setInternalValue('');
     lastNotifiedRef.current = '';
+
     onImmediateChange?.('');
     onChangeRef.current?.('');
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      debouncedSearch.flush?.();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleClear();
+    }
+    props.onKeyDown?.(e);
+  };
+
   return (
-    <div className={`search-input-wrap ${className}`} style={style}>
+    <div
+      className={`search-input-wrap ${className}`}
+      style={style}
+    >
       <svg
         className="search-icon"
         viewBox="0 0 24 24"
@@ -402,6 +455,7 @@ export function SearchInput({
         <circle cx="11" cy="11" r="8" />
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
       </svg>
+
       <input
         type="text"
         id={id}
@@ -409,8 +463,11 @@ export function SearchInput({
         placeholder={placeholder}
         value={internalValue}
         onChange={handleInputChange}
+        onKeyDown={handleKeyDown}
+        autoComplete="off"
         {...props}
       />
+
       {Boolean(internalValue) && (
         <button
           type="button"
@@ -418,6 +475,7 @@ export function SearchInput({
           onClick={handleClear}
           title="Clear search"
           aria-label="Clear search"
+          tabIndex={-1}
         >
           ✕
         </button>
@@ -425,4 +483,6 @@ export function SearchInput({
     </div>
   );
 }
+
+
 

@@ -4,9 +4,9 @@
  * Step 2: Fetch eligible employees, show blockers, checkbox selection.
  * Create action calls /api/payruns/wizard with only the selected employee IDs.
  */
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { api, money } from '../../api.js';
-import { useApi, Modal, Field, Badge, Alert } from '../../components/ui.jsx';
+import { useApi, Modal, Field, Badge, Alert, SearchInput } from '../../components/ui.jsx';
 
 export default function PayrunWizardModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
@@ -16,11 +16,22 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
   });
   const [eligible, setEligible] = useState([]);
   const [selected, setSelected] = useState(new Set());
+  const [empSearch, setEmpSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const { data: structures, error: structError } = useApi(() => api.get('/structures'), []);
   const { data: departments } = useApi(() => api.get('/departments'), []);
+
+  const visibleEligible = useMemo(() => {
+    if (!empSearch.trim()) return eligible;
+    const q = empSearch.toLowerCase().trim();
+    return eligible.filter((e) =>
+      e.name?.toLowerCase().includes(q) ||
+      e.department_name?.toLowerCase().includes(q) ||
+      e.contract_name?.toLowerCase().includes(q)
+    );
+  }, [eligible, empSearch]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
@@ -156,9 +167,17 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
 
       {step === 2 && (
         <>
-          <p className="meta" style={{ marginBottom: 12 }}>
-            {eligible.length} employee(s) found · {selected.size} selected · Period: <strong>{form.period_start} → {form.period_end}</strong> ({form.period_start && form.period_end ? Math.round((new Date(form.period_end) - new Date(form.period_start)) / 86400000) + 1 : 0} days)
-          </p>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 }}>
+            <p className="meta" style={{ margin: 0 }}>
+              {eligible.length} employee(s) found · {selected.size} selected · Period: <strong>{form.period_start} → {form.period_end}</strong> ({form.period_start && form.period_end ? Math.round((new Date(form.period_end) - new Date(form.period_start)) / 86400000) + 1 : 0} days)
+            </p>
+            <SearchInput
+              placeholder="Search eligible employees..."
+              value={empSearch}
+              onChange={setEmpSearch}
+              style={{ maxWidth: 240 }}
+            />
+          </div>
 
           <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
@@ -175,7 +194,7 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
                 </tr>
               </thead>
               <tbody>
-                {eligible.map((emp) => {
+                {visibleEligible.map((emp) => {
                   const blocked = !emp.eligible || (emp.blockers && emp.blockers.length > 0);
                   const hasWarnings = emp.warnings && emp.warnings.length > 0;
                   return (

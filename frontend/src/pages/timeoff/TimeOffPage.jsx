@@ -359,14 +359,16 @@ export default function TimeOffPage() {
   const [allocSaving, setAllocSaving] = useState(false);
   const [allocFormError, setAllocFormError] = useState(null);
 
+  const [allocSearch, setAllocSearch] = useState('');
   const { data: allocations, loading: allocLoading, error: allocError, reload: reloadAllocations, setData: setAllocationsData } = useApi(
     () => {
       const q = new URLSearchParams();
       if (effectiveEmpId) q.set('employee_id', effectiveEmpId);
+      if (allocSearch) q.set('search', allocSearch);
       const qs = q.toString();
       return api.get(`/time-off/allocations${qs ? '?' + qs : ''}`);
     },
-    [effectiveEmpId, activeTab]
+    [effectiveEmpId, activeTab, allocSearch]
   );
 
   const [allocForm, setAllocForm] = useState({
@@ -773,11 +775,21 @@ export default function TimeOffPage() {
 
       {/* TAB 2: ALLOCATIONS */}
       {activeTab === 'allocations' && (
-        <States loading={allocLoading} error={allocError} empty={!allocations?.length} onRetry={reloadAllocations}>
-          <Card pad={false}>
-            <Table columns={allocationColumns} rows={allocations || []} />
-          </Card>
-        </States>
+        <>
+          <div className="row" style={{ marginBottom: 16, justifyContent: 'flex-end' }}>
+            <SearchInput
+              placeholder="Search employee or leave type..."
+              value={allocSearch}
+              onChange={setAllocSearch}
+              style={{ width: 280 }}
+            />
+          </div>
+          <States loading={allocLoading} error={allocError} empty={!allocations?.length} onRetry={reloadAllocations}>
+            <Card pad={false}>
+              <Table columns={allocationColumns} rows={allocations || []} />
+            </Card>
+          </States>
+        </>
       )}
 
       {/* TAB 3: TYPES */}

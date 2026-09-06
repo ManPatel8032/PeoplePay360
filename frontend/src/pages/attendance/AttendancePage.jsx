@@ -152,7 +152,6 @@ export default function AttendancePage() {
     status: 'present',
     notes: '',
   });
-
   // Validation / Notice popup modal
   const [infoModal, setInfoModal] = useState({ open: false, title: '', message: '', type: 'info' });
 

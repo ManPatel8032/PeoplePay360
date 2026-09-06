@@ -204,11 +204,9 @@ export default function ContractsPage() {
       checkOverlap(updated);
     }
   };
-
   const handleSave = async (e) => {
     e.preventDefault();
     setFormError(null);
-
     // Validations
     if (!form.employee_id) {
       setFormError('Please select an employee.');
@@ -242,7 +240,6 @@ export default function ContractsPage() {
       setFormError(conflictMsg);
       return;
     }
-
     setSaving(true);
     const payload = {
       employee_id: Number(form.employee_id),
