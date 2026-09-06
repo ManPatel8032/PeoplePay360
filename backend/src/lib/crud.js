@@ -74,6 +74,7 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
        VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')}) RETURNING *`,
       cols.map((c) => norm(req.body[c]))
     );
+    if (hooks.afterCreate) await hooks.afterCreate(req, row);
     res.status(201).json({ data: row });
   }));
 
@@ -87,6 +88,7 @@ export function crudRouter({ table, module, columns, listSql, itemSql, filters =
       [...cols.map((c) => norm(req.body[c])), req.params.id]
     );
     if (!row) return res.status(404).json({ error: 'Not found' });
+    if (hooks.afterUpdate) await hooks.afterUpdate(req, row);
     res.json({ data: row });
   }));
 

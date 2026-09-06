@@ -124,25 +124,29 @@ usersRouter.post('/', can('users', 'write'), ah(async (req, res) => {
   if (!parsed.success) return bad(res, parsed);
   const { name, email, role, employee_id = null, password, must_change_password = true } = parsed.data;
 
-  const emailTaken = await one('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)', [email]);
-  if (emailTaken) {
-    return res.status(400).json({ error: 'That email already has an account', fields: { email: ['Already in use'] } });
-  }
-
+  let userEmail = email;
   if (employee_id) {
-    const emp = await one('SELECT id FROM employees WHERE id = $1', [employee_id]);
+    const emp = await one('SELECT id, work_email FROM employees WHERE id = $1', [employee_id]);
     if (!emp) return res.status(400).json({ error: 'Linked employee does not exist', fields: { employee_id: ['Unknown employee'] } });
 
     const linked = await one('SELECT 1 FROM users WHERE employee_id = $1', [employee_id]);
     if (linked) {
       return res.status(400).json({ error: 'That employee already has an account', fields: { employee_id: ['Already linked'] } });
     }
+    if (emp.work_email) {
+      userEmail = emp.work_email;
+    }
+  }
+
+  const emailTaken = await one('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)', [userEmail]);
+  if (emailTaken) {
+    return res.status(400).json({ error: 'That email already has an account', fields: { email: ['Already in use'] } });
   }
 
   const created = await one(
     `INSERT INTO users (name, email, password_hash, role, employee_id, is_active, must_change_password)
      VALUES ($1,$2,$3,$4,$5,TRUE,$6) RETURNING id`,
-    [name, email, await bcrypt.hash(password, 10), role, employee_id, must_change_password]
+    [name, userEmail, await bcrypt.hash(password, 10), role, employee_id, must_change_password]
   );
   res.status(201).json({ data: await one(`${USER_SQL} WHERE u.id = $1`, [created.id]) });
 }));
@@ -169,21 +173,29 @@ usersRouter.patch('/:id', can('users', 'write'), ah(async (req, res) => {
     return res.status(400).json({ error: 'This is the last active admin — promote another admin first' });
   }
 
+  let empEmail = null;
   if (employee_id) {
+    const emp = await one('SELECT id, work_email FROM employees WHERE id = $1', [employee_id]);
+    if (!emp) return res.status(400).json({ error: 'Linked employee does not exist', fields: { employee_id: ['Unknown employee'] } });
+
     const linked = await one('SELECT id FROM users WHERE employee_id = $1 AND id <> $2', [employee_id, id]);
     if (linked) {
       return res.status(400).json({ error: 'That employee already has an account', fields: { employee_id: ['Already linked'] } });
+    }
+    if (emp.work_email) {
+      empEmail = emp.work_email;
     }
   }
 
   await query(
     `UPDATE users SET
        name        = COALESCE($1, name),
-       role        = COALESCE($2, role),
-       employee_id = CASE WHEN $3::boolean THEN $4 ELSE employee_id END,
-       is_active   = COALESCE($5, is_active)
-     WHERE id = $6`,
-    [name ?? null, role ?? null, employee_id !== undefined, employee_id ?? null, is_active ?? null, id]
+       email       = COALESCE($2, email),
+       role        = COALESCE($3, role),
+       employee_id = CASE WHEN $4::boolean THEN $5 ELSE employee_id END,
+       is_active   = COALESCE($6, is_active)
+     WHERE id = $7`,
+    [name ?? null, empEmail, role ?? null, employee_id !== undefined, employee_id ?? null, is_active ?? null, id]
   );
 
   // Deactivating someone must also end their sessions immediately.

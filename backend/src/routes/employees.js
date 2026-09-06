@@ -63,6 +63,11 @@ export const employees = crudRouter({
   hooks: {
     beforeCreate: (req) => validateEmployee(req.body, true),
     beforeUpdate: (req) => validateEmployee(req.body, false),
+    afterUpdate: async (_req, row) => {
+      if (row.work_email) {
+        await query('UPDATE users SET email = $1 WHERE employee_id = $2', [row.work_email, row.id]);
+      }
+    },
     /*
      * Drop CASCADE on employee deletion:
      * When HR/Admin deletes an employee, all their associated records
@@ -75,38 +80,7 @@ export const employees = crudRouter({
 
       // 2. Cascade delete payslip lines and payslips (including validated/paid ones)
       await query(`
-        DELETE FROM payslip_jemil@jemil:~/Desktop/PeoplePay360$ git pull origin main
-remote: Enumerating objects: 26, done.
-remote: Counting objects: 100% (26/26), done.
-remote: Compressing objects: 100% (2/2), done.
-remote: Total 14 (delta 10), reused 14 (delta 10), pack-reused 0 (from 0)
-Unpacking objects: 100% (14/14), 1.78 KiB | 456.00 KiB/s, done.
-From https://github.com/ManPatel8032/PeoplePay360
- * branch            main       -> FETCH_HEAD
-   b12cc83..9eef9fe  main       -> origin/main
-hint: You have divergent branches and need to specify how to reconcile them.
-hint: You can do so by running one of the following commands sometime before
-hint: your next pull:
-hint:
-hint:   git config pull.rebase false  # merge
-hint:   git config pull.rebase true   # rebase
-hint:   git config pull.ff only       # fast-forward only
-hint:
-hint: You can replace "git config" with "git config --global" to set a default
-hint: preference for all repositories. You can also pass --rebase, --no-rebase,
-hint: or --ff-only on the command line to override the configured default per
-hint: invocation.
-fatal: Need to specify how to reconcile divergent branches.
-jemil@jemil:~/Desktop/PeoplePay360$ ^C
-jemil@jemil:~/Desktop/PeoplePay360$ git config pull.rebase false 
-jemil@jemil:~/Desktop/PeoplePay360$ git push origin main
-To https://github.com/ManPatel8032/PeoplePay360.git
- ! [rejected]        main -> main (non-fast-forward)
-error: failed to push some refs to 'https://github.com/ManPatel8032/PeoplePay360.git'
-hint: Updates were rejected because the tip of your current branch is behind
-hint: its remote counterpart. If you want to integrate the remote changes,
-hint: use 'git pull' before pushing again.
-hint: See the 'Note about fast-forwards' in 'git push --help' for details.lines
+        DELETE FROM payslip_lines
          WHERE payslip_id IN (SELECT id FROM payslips WHERE employee_id = $1)
       `, [req.params.id]);
       await query('DELETE FROM payslips WHERE employee_id = $1', [req.params.id]);

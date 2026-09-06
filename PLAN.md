@@ -129,10 +129,10 @@ new table refresh_tokens(
 | Email | Role |
 |---|---|
 | `admin@peoplepay360.com` | Admin |
-| `meera.hr@peoplepay360.com` | HR Manager |
-| `arjun.pay@peoplepay360.com` | Payroll Manager |
-| `ishita.pay@peoplepay360.com` | Payroll User |
-| `priya.emp@peoplepay360.com` | Employee |
+| `meera.joshi@peoplepay360.com` | HR Manager |
+| `arjun.patel@peoplepay360.com` | Payroll Manager |
+| `ishita.banerjee@peoplepay360.com` | Payroll User |
+| `priya.nair@peoplepay360.com` | Employee |
 
 ---
 

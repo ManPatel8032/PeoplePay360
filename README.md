@@ -142,14 +142,14 @@ All use the dev password from `.env.example` and are forced to change it at firs
 | Email | Role | Who they are |
 |---|---|---|
 | `admin@peoplepay360.com` | Admin | **No employee record** — an IT account with no contract or payslip |
-| `rohini.md@peoplepay360.com` | Admin | Managing Director, root of the org chart |
-| `meera.hr@peoplepay360.com` | HR Manager | Heads HR |
-| `arjun.pay@peoplepay360.com` | Payroll Manager | Heads Finance |
-| `ishita.pay@peoplepay360.com` | Payroll User | Reports to Arjun |
-| `aarav.emp@peoplepay360.com` | Employee | **Manages 4 people** |
-| `vikram.emp@peoplepay360.com` | Employee | **Manages 2 people** |
-| `nisha.emp@peoplepay360.com` | Employee | **Manages 1 person** |
-| `priya.emp@peoplepay360.com` | Employee | Individual contributor |
+| `rohini.deshpande@peoplepay360.com` | Admin | Managing Director, root of the org chart |
+| `meera.joshi@peoplepay360.com` | HR Manager | Heads HR |
+| `arjun.patel@peoplepay360.com` | Payroll Manager | Heads Finance |
+| `ishita.banerjee@peoplepay360.com` | Payroll User | Reports to Arjun |
+| `aarav.sharma@peoplepay360.com` | Employee | **Manages 4 people** |
+| `vikram.rao@peoplepay360.com` | Employee | **Manages 2 people** |
+| `nisha.verma@peoplepay360.com` | Employee | **Manages 1 person** |
+| `priya.nair@peoplepay360.com` | Employee | Individual contributor |
 
 **Employees and users are deliberately not one-to-one.** Seven employees have no login at
 all — plenty of real staff are paid without ever signing in — and `admin@` is a user with

@@ -225,23 +225,30 @@ async function main() {
    * being a manager is a position in the org chart, not a permission level.
    */
   const userDefs = [
-    ['Ops Admin',        'admin@peoplepay360.com',     'admin',           null],
-    ['Rohini Deshpande', 'rohini.md@peoplepay360.com', 'admin',           byName['Rohini Deshpande']],
-    ['Meera Joshi',      'meera.hr@peoplepay360.com',  'hr_manager',      byName['Meera Joshi']],
-    ['Arjun Patel',      'arjun.pay@peoplepay360.com', 'payroll_manager', byName['Arjun Patel']],
-    ['Ishita Banerjee',  'ishita.pay@peoplepay360.com','payroll_user',    byName['Ishita Banerjee']],
+    ['Ops Admin',        'admin@peoplepay360.com',            'admin',           null],
+    ['Rohini Deshpande', 'rohini.deshpande@peoplepay360.com', 'admin',           byName['Rohini Deshpande']],
+    ['Meera Joshi',      'meera.joshi@peoplepay360.com',      'hr_manager',      byName['Meera Joshi']],
+    ['Arjun Patel',      'arjun.patel@peoplepay360.com',      'payroll_manager', byName['Arjun Patel']],
+    ['Ishita Banerjee',  'ishita.banerjee@peoplepay360.com',  'payroll_user',    byName['Ishita Banerjee']],
     // Every manager gets a login so subtree visibility can be demonstrated at
     // each level: department head, team lead, then an individual contributor.
-    ['Aarav Sharma',     'aarav.emp@peoplepay360.com', 'employee',        byName['Aarav Sharma']],
-    ['Priya Nair',       'priya.emp@peoplepay360.com', 'employee',        byName['Priya Nair']],
-    ['Sneha Kulkarni',   'sneha.emp@peoplepay360.com', 'employee',        byName['Sneha Kulkarni']],
-    ['Vikram Rao',       'vikram.emp@peoplepay360.com','employee',        byName['Vikram Rao']],
-    ['Ananya Iyer',      'ananya.emp@peoplepay360.com','employee',        byName['Ananya Iyer']],
-    ['Karan Bhatia',     'karan.emp@peoplepay360.com', 'employee',        byName['Karan Bhatia']],
-    ['Nisha Verma',      'nisha.emp@peoplepay360.com', 'employee',        byName['Nisha Verma']],
-    ['Rohan Mehta',      'rohan.emp@peoplepay360.com', 'employee',        byName['Rohan Mehta']],
+    ['Aarav Sharma',     'aarav.sharma@peoplepay360.com',     'employee',        byName['Aarav Sharma']],
+    ['Priya Nair',       'priya.nair@peoplepay360.com',       'employee',        byName['Priya Nair']],
+    ['Sneha Kulkarni',   'sneha.kulkarni@peoplepay360.com',   'employee',        byName['Sneha Kulkarni']],
+    ['Vikram Rao',       'vikram.rao@peoplepay360.com',       'employee',        byName['Vikram Rao']],
+    ['Ananya Iyer',      'ananya.iyer@peoplepay360.com',      'employee',        byName['Ananya Iyer']],
+    ['Karan Bhatia',     'karan.bhatia@peoplepay360.com',     'employee',        byName['Karan Bhatia']],
+    ['Nisha Verma',      'nisha.verma@peoplepay360.com',      'employee',        byName['Nisha Verma']],
+    ['Rohan Mehta',      'rohan.mehta@peoplepay360.com',      'employee',        byName['Rohan Mehta']],
   ];
-  for (const [name, email, role, empId] of userDefs) {
+  for (const [name, defaultEmail, role, empId] of userDefs) {
+    let email = defaultEmail;
+    if (empId) {
+      const emp = await one('SELECT work_email FROM employees WHERE id = $1', [empId]);
+      if (emp?.work_email) {
+        email = emp.work_email;
+      }
+    }
     await query(
       `INSERT INTO users (name, email, password_hash, role, employee_id, is_active, must_change_password)
        VALUES ($1, $2, $3, $4, $5, TRUE, TRUE)`,
