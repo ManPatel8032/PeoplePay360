@@ -16,14 +16,18 @@ export default function PayslipList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlState = searchParams.get('state') || '';
   const urlSearch = searchParams.get('search') || '';
-  const [filters, setFilters] = useState({ payrun_id: '', employee_id: '', state: urlState });
+  const urlEmp = searchParams.get('employee_id') || '';
+  const urlRun = searchParams.get('payrun_id') || '';
+  const [filters, setFilters] = useState({ payrun_id: urlRun, employee_id: urlEmp, state: urlState });
   const [search, setSearch] = useState(urlSearch);
   const [selectedId, setSelectedId] = useState(null);
 
   useEffect(() => {
     const s = searchParams.get('state') || '';
     const q = searchParams.get('search') || '';
-    setFilters((f) => (f.state === s ? f : { ...f, state: s }));
+    const emp = searchParams.get('employee_id') || '';
+    const run = searchParams.get('payrun_id') || '';
+    setFilters((f) => ({ ...f, state: s, employee_id: emp, payrun_id: run }));
     if (q) setSearch(q);
   }, [searchParams]);
 
@@ -115,6 +119,22 @@ export default function PayslipList() {
               <option value="paid">Paid</option>
             </select>
           </div>
+          {filters.employee_id && (
+            <div className="field" style={{ alignSelf: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => {
+                  setFilters((f) => ({ ...f, employee_id: '' }));
+                  const next = new URLSearchParams(searchParams);
+                  next.delete('employee_id');
+                  setSearchParams(next);
+                }}
+              >
+                Clear Employee Filter ✕
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

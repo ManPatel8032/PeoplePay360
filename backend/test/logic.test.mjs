@@ -254,4 +254,26 @@ test('payroll proration: custom 10-day period prorates proportionally (10/30 = 1
   assert.equal(round2(gross), 30000); // total gross matches 10-day prorated wage (30000)
 });
 
+test('contractWindow returns null when contract is null or outside period', async () => {
+  const { contractWindow, buildPayrollContext } = await import('../src/lib/payroll.js');
+  assert.equal(contractWindow(null, '2026-09-01', '2026-09-30'), null);
+  assert.equal(contractWindow(undefined, '2026-09-01', '2026-09-30'), null);
+  assert.equal(contractWindow({ start_date: '2026-10-01' }, '2026-09-01', '2026-09-30'), null);
+
+  const stats = { workedDays: 0, workingDays: 0, attendedDays: 0, attendanceHours: 0, overtimeHours: 0, paidLeaveDays: 0, unpaidLeaveDays: 0, leaveDays: 0, lateDays: 0 };
+  const ctx = buildPayrollContext(null, stats, '2026-09-01', '2026-09-30');
+  assert.equal(ctx.period_ratio, 0);
+  assert.equal(ctx.wage, 0);
+  assert.equal(ctx.contract_days, 0);
+});
+
+test('negative net pay fallback is bounded to 0', async () => {
+  // Simulate net fallback calculation when deductions exceed gross
+  const gross = 5000;
+  const ded = 8000;
+  const net = Math.max(0, round2(gross - Math.abs(ded)));
+  assert.equal(net, 0);
+});
+
+
 

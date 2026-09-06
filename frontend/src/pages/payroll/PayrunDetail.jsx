@@ -113,6 +113,30 @@ export default function PayrunDetail({ payrunId, onBack }) {
         </span>
       );
     }},
+    ...(canRunPayroll && run && ['draft', 'computed'].includes(run.state) ? [{
+      key: 'recompute',
+      label: '',
+      align: 'right',
+      render: (r) => (
+        <button
+          type="button"
+          className="btn btn-sm"
+          style={{ padding: '2px 8px', minHeight: 24, fontSize: 12 }}
+          title="Recompute this payslip"
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              await api.post(`/payslips/${r.id}/compute`);
+              reload();
+            } catch (err) {
+              setActionErr(err.message);
+            }
+          }}
+        >
+          ↻
+        </button>
+      ),
+    }] : []),
     ...(canDeleteSlip ? [{
       key: 'remove',
       label: '',
@@ -216,6 +240,15 @@ export default function PayrunDetail({ payrunId, onBack }) {
                       ⚠ {errorWarnings.length} blocking error(s) must be resolved first
                     </div>
                   )}
+                </div>
+              )}
+              {run.state === 'computed' && canRunPayroll && (
+                <div>
+                  <button className="btn btn-secondary" onClick={() => doAction('compute')}
+                          disabled={!!acting}>
+                    {acting === 'compute' ? 'Recomputing…' : '↻ Recompute All'}
+                  </button>
+                  <div className="meta" style={{ marginTop: 4 }}>Recalculate payslips and refresh warnings</div>
                 </div>
               )}
               {canSend && canRunPayroll && (

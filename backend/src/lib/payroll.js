@@ -32,8 +32,9 @@ const today = () => new Date().toISOString().slice(0, 10);
  * Returns null when the contract does not reach into the period at all.
  */
 export function contractWindow(contract, periodStart, periodEnd) {
-  const start = contract?.start_date && contract.start_date > periodStart ? contract.start_date : periodStart;
-  const end = contract?.end_date && contract.end_date < periodEnd ? contract.end_date : periodEnd;
+  if (!contract) return null;
+  const start = contract.start_date && contract.start_date > periodStart ? contract.start_date : periodStart;
+  const end = contract.end_date && contract.end_date < periodEnd ? contract.end_date : periodEnd;
   return start > end ? null : { start, end };
 }
 
@@ -231,7 +232,7 @@ export async function computeRules(structureId, ctx) {
   // net of a month lost entirely to unpaid absence — as "no rule", and the
   // fallback then reported a negative salary the payslip never actually showed.
   const gross = ran.GROSS ? cat.GROSS : round2(cat.BASIC + cat.ALW);
-  const net = ran.NET ? cat.NET : round2(gross - Math.abs(cat.DED));
+  const net = ran.NET ? cat.NET : Math.max(0, round2(gross - Math.abs(cat.DED)));
   return { lines, gross, net, categories: cat };
 }
 
@@ -393,6 +394,12 @@ export async function computePayslip(payslipId) {
     payrunId: slip.payrun_id, payrunStructureId: payrun.structure_id,
     periodStart: slip.period_start, periodEnd: slip.period_end,
   });
+
+  // Surface any formula evaluation errors from rule lines as blocking errors
+  const formulaErrors = lines.filter((l) => l.error);
+  for (const fe of formulaErrors) {
+    warnings.push({ level: 'error', message: `Formula error in rule "${fe.code}": ${fe.error}` });
+  }
 
   await tx(async (c) => {
     await c.query('DELETE FROM payslip_lines WHERE payslip_id = $1', [slip.id]);

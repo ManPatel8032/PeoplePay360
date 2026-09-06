@@ -12,9 +12,11 @@ const CAT_LABEL = { BASIC: 'Basic', ALW: 'Allowance', GROSS: 'Gross', DED: 'Dedu
 export default function PayslipDetail({ payslipId, onBack }) {
   const { can } = useAuth();
   const canDeleteSlip = can('payslips', 'delete') !== 'none';
+  const canWritePayroll = can('payslips', 'write') !== 'none';
 
   const [downloading, setDownloading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sendMsg, setSendMsg] = useState('');
 
@@ -48,6 +50,20 @@ export default function PayslipDetail({ payslipId, onBack }) {
       setSendMsg(`✗ ${e.message}`);
     } finally {
       setSending(false);
+    }
+  };
+
+  const recomputePayslip = async () => {
+    setRecomputing(true);
+    setSendMsg('');
+    try {
+      await api.post(`/payslips/${payslipId}/compute`);
+      reload();
+      setSendMsg('✓ Payslip recomputed successfully');
+    } catch (e) {
+      setSendMsg(`✗ ${e.message}`);
+    } finally {
+      setRecomputing(false);
     }
   };
 
@@ -98,6 +114,11 @@ export default function PayslipDetail({ payslipId, onBack }) {
         </div>
         {slip && (
           <div className="row">
+            {canWritePayroll && !['validated', 'paid'].includes(slip.state) && (
+              <button className="btn btn-secondary" onClick={recomputePayslip} disabled={recomputing}>
+                {recomputing ? 'Recomputing…' : '↻ Recompute'}
+              </button>
+            )}
             <button className="btn" onClick={downloadPdf} disabled={downloading}>
               {downloading ? 'Downloading…' : '📄 Download PDF'}
             </button>

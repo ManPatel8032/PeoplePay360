@@ -88,8 +88,8 @@ rules.post('/preview', can('rules', 'write'), ah(async (req, res) => {
 // ---------- Payruns (B5, B6) ----------
 const PAYRUN_SQL = `
   SELECT p.*, s.name AS structure_name, d.name AS department_name,
-         (SELECT COUNT(*)::int FROM payslips ps WHERE ps.payrun_id = p.id) AS payslip_count,
-         (SELECT COALESCE(SUM(ps.net),0) FROM payslips ps WHERE ps.payrun_id = p.id) AS total_net
+         (SELECT COUNT(*)::int FROM payslips ps WHERE ps.payrun_id = p.id AND ps.state <> 'cancelled') AS payslip_count,
+         (SELECT COALESCE(SUM(ps.net),0) FROM payslips ps WHERE ps.payrun_id = p.id AND ps.state <> 'cancelled') AS total_net
     FROM payruns p
     JOIN salary_structures s ON s.id = p.structure_id
     LEFT JOIN departments d ON d.id = p.department_id`;
@@ -129,11 +129,20 @@ export const payruns = crudRouter({
  * Nothing is created yet — the wizard only creates on "Create Payrun" (B5).
  */
 payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
-  const { period_start, period_end, department_id, employee_type } = req.body;
+  const { period_start, period_end, structure_id, department_id, employee_type } = req.body;
+  if (!period_start || !period_end)
+    return res.status(400).json({ error: 'Period start and period end are required' });
+  if (period_end < period_start)
+    return res.status(400).json({ error: 'Period end must be on or after period start' });
+
   const params = [period_end, period_start];
   let filter = '';
   if (department_id) { params.push(department_id); filter += ` AND e.department_id = $${params.length}`; }
   if (employee_type) { params.push(employee_type); filter += ` AND e.employee_type = $${params.length}`; }
+  if (structure_id) {
+    params.push(structure_id);
+    filter += ` AND (c.structure_id = $${params.length} OR (c.structure_id IS NULL AND c.id IS NOT NULL))`;
+  }
 
   const rows = await query(
     `SELECT e.id, e.name, e.employee_type, e.bank_account, d.name AS department_name,
@@ -167,8 +176,10 @@ payruns.post('/eligible', can('payruns', 'read'), ah(async (req, res) => {
       eligible: !!r.contract_id && r.existing_payslips === 0,
       blockers: [
         !r.contract_id && 'No contract for this period',
-        !r.bank_account && 'Missing bank details',
         r.existing_payslips > 0 && `Already payrolled for ${r.overlapping_periods}`,
+      ].filter(Boolean),
+      warnings: [
+        !r.bank_account && 'Missing bank details',
       ].filter(Boolean),
     })),
   });
@@ -233,7 +244,7 @@ async function payrunDetail(id) {
        FROM payslips ps
        JOIN employees e ON e.id = ps.employee_id
        LEFT JOIN departments d ON d.id = e.department_id
-      WHERE ps.payrun_id = $1 ORDER BY e.name`,
+      WHERE ps.payrun_id = $1 AND ps.state <> 'cancelled' ORDER BY e.name`,
     [id]
   );
   run.warning_count = run.payslips.reduce(
@@ -269,9 +280,24 @@ payruns.post('/:id/validate', can('payruns', 'write'), ah(async (req, res) => {
   if (['validated', 'paid'].includes(run.state))
     return res.status(400).json({ error: `Payrun is already ${run.state}` });
 
-  const blocking = run.payslips.flatMap((p) =>
+  let blocking = run.payslips.flatMap((p) =>
     (p.warnings || []).filter((w) => w.level === 'error').map((w) => `${p.employee_name}: ${w.message}`)
   );
+
+  // If there are blocking warnings, recompute those slips to check if external fixes (e.g. bank details) resolved them
+  if (blocking.length) {
+    for (const p of run.payslips) {
+      if ((p.warnings || []).some((w) => w.level === 'error')) {
+        await computePayslip(p.id);
+      }
+    }
+    const refreshed = await payrunDetail(run.id);
+    run.payslips = refreshed.payslips;
+    blocking = run.payslips.flatMap((p) =>
+      (p.warnings || []).filter((w) => w.level === 'error').map((w) => `${p.employee_name}: ${w.message}`)
+    );
+  }
+
   if (blocking.length && !(req.body.force && req.user?.role === 'admin'))
     return res.status(400).json({ error: 'Resolve blocking warnings before validating', blockers: blocking });
 

@@ -188,7 +188,7 @@ export default function EmployeeDetailView({ employeeId, initialEmployee, onClos
         {canReadPayslips && (
           <div
             className="smart-btn"
-            onClick={() => navigate(`/payroll?employee_id=${employee.id}`)}
+            onClick={() => navigate(`/payroll?tab=payslips&employee_id=${employee.id}`)}
             title="View payslips"
           >
             <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--accent)' }}>

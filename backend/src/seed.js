@@ -408,7 +408,27 @@ async function main() {
     for (const s of slips) await computePayslip(s.id);
     await query("UPDATE payslips SET state='paid' WHERE payrun_id=$1", [run.id]);
     await query("UPDATE payruns SET state='paid' WHERE id=$1", [run.id]);
-    console.log(`  ${label}: ${slips.length} payslips`);
+
+    // contractors are paid on their own structure — seed their monthly run
+    const cRun = await one(
+      `INSERT INTO payruns (name,structure_id,period_start,period_end,state)
+       VALUES ($1,$2,$3,$4,'draft') RETURNING id`,
+      [`Contractor Payroll — ${label}`, contractStruct, start, end]
+    );
+    for (const id of empIds) {
+      const isContractor = people[empIds.indexOf(id)].type === 'contract';
+      if (!isContractor) continue;
+      await query(
+        `INSERT INTO payslips (payrun_id,employee_id,period_start,period_end,structure_id)
+         VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [cRun.id, id, start, end, contractStruct]
+      );
+    }
+    const cSlips = await query('SELECT id FROM payslips WHERE payrun_id = $1', [cRun.id]);
+    for (const s of cSlips) await computePayslip(s.id);
+    await query("UPDATE payslips SET state='paid' WHERE payrun_id=$1", [cRun.id]);
+    await query("UPDATE payruns SET state='paid' WHERE id=$1", [cRun.id]);
+
+    console.log(`  ${label}: ${slips.length} regular payslips, ${cSlips.length} contractor payslips`);
   }
 
   // current month left as a draft payrun so the demo has something to Compute live
@@ -424,6 +444,21 @@ async function main() {
       `INSERT INTO payslips (payrun_id,employee_id,period_start,period_end,structure_id)
        VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [draftRun.id, id, cur.start, cur.end, regular]
     );
+
+  // current month draft payrun for contractors
+  const draftContractorRun = await one(
+    `INSERT INTO payruns (name,structure_id,period_start,period_end,state)
+     VALUES ($1,$2,$3,$4,'draft') RETURNING id`,
+    [`Contractor Payroll — ${curLabel}`, contractStruct, cur.start, cur.end]
+  );
+  for (const id of empIds) {
+    const isContractor = people[empIds.indexOf(id)].type === 'contract';
+    if (!isContractor) continue;
+    await query(
+      `INSERT INTO payslips (payrun_id,employee_id,period_start,period_end,structure_id)
+       VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, [draftContractorRun.id, id, cur.start, cur.end, contractStruct]
+    );
+  }
 
   const counts = await one(`
     SELECT (SELECT COUNT(*)::int FROM employees)  AS employees,

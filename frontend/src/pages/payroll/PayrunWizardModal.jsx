@@ -25,12 +25,17 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const fetchEligible = async () => {
+    if (form.period_end < form.period_start) {
+      setError('Period end must be on or after period start');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
       const res = await api.post('/payruns/eligible', {
         period_start: form.period_start,
         period_end: form.period_end,
+        structure_id: form.structure_id ? Number(form.structure_id) : undefined,
         department_id: form.department_id || undefined,
         employee_type: form.employee_type || undefined,
       });
@@ -82,7 +87,8 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
     }
   };
 
-  const canProceed = form.structure_id && form.period_start && form.period_end;
+  const isDateInvalid = Boolean(form.period_start && form.period_end && form.period_end < form.period_start);
+  const canProceed = Boolean(form.structure_id && form.period_start && form.period_end && !isDateInvalid);
 
   return (
     <Modal title="New Payrun Wizard" onClose={onClose} width={720}>
@@ -121,9 +127,14 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
                 <input className="input" type="date" value={form.period_start} onChange={set('period_start')} />
               </Field>
               <Field label="Period End *">
-                <input className="input" type="date" value={form.period_end} onChange={set('period_end')} />
+                <input className="input" type="date" value={form.period_end} min={form.period_start} onChange={set('period_end')} />
               </Field>
             </div>
+            {isDateInvalid && (
+              <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: -8 }}>
+                ⚠ Period end must be on or after period start ({form.period_start})
+              </div>
+            )}
             <Field label="Employee Type (optional)">
               <select className="select" value={form.employee_type} onChange={set('employee_type')}>
                 <option value="">All types</option>
@@ -165,7 +176,8 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
               </thead>
               <tbody>
                 {eligible.map((emp) => {
-                  const blocked = !emp.eligible || emp.blockers.length > 0;
+                  const blocked = !emp.eligible || (emp.blockers && emp.blockers.length > 0);
+                  const hasWarnings = emp.warnings && emp.warnings.length > 0;
                   return (
                     <tr key={emp.id} style={{ opacity: blocked ? 0.5 : 1 }}>
                       <td style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
@@ -192,6 +204,13 @@ export default function PayrunWizardModal({ onClose, onCreated }) {
                           <div>
                             {emp.blockers.map((b, i) => (
                               <div key={i} style={{ fontSize: 12, color: 'var(--danger)' }}>⚠ {b}</div>
+                            ))}
+                          </div>
+                        ) : hasWarnings ? (
+                          <div>
+                            <Badge value="eligible" tone="success" />
+                            {emp.warnings.map((w, i) => (
+                              <div key={i} style={{ fontSize: 12, color: 'var(--warning, #b45309)', marginTop: 2 }}>⚠ {w}</div>
                             ))}
                           </div>
                         ) : (
