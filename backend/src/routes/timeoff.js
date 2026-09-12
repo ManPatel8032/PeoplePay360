@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
 import { can, scope } from '../auth.js';
-import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
+import { employeeScopeFilter, canSeeEmployee , blockPrivilegedManagement } from '../lib/guards.js';
 import { ah } from '../lib/crud.js';
 import { daysBetween, scheduledDays } from '../lib/dates.js';
 
@@ -170,6 +170,9 @@ allocations.post('/', can('allocations', 'write'), ah(async (req, res) => {
   const { employee_id, type_id, amount, state = 'approved', valid_from, valid_to, note } = req.body;
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
   if (!type_id) return res.status(400).json({ error: 'Time off type is required' });
+
+  const blockedPriv = await blockPrivilegedManagement(req, employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
   const numAmount = Number(amount);
   if (isNaN(numAmount) || numAmount <= 0) return res.status(400).json({ error: 'Amount must be greater than 0' });
   if (!isIncrement(numAmount)) {
@@ -199,8 +202,11 @@ allocations.post('/', can('allocations', 'write'), ah(async (req, res) => {
 }));
 
 allocations.post('/:id/approve', can('allocations', 'write'), ah(async (req, res) => {
+  const existing = await one('SELECT employee_id FROM allocations WHERE id = $1', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
   const row = await one("UPDATE allocations SET state='approved' WHERE id=$1 RETURNING id", [req.params.id]);
-  if (!row) return res.status(404).json({ error: 'Not found' });
   const full = await one(`${ALLOC_SQL} WHERE a.id = $1`, [row.id]);
   res.json({
     data: {
@@ -213,13 +219,21 @@ allocations.post('/:id/approve', can('allocations', 'write'), ah(async (req, res
 }));
 
 allocations.post('/:id/refuse', can('allocations', 'write'), ah(async (req, res) => {
+  const existing = await one('SELECT employee_id FROM allocations WHERE id = $1', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
   const row = await one("UPDATE allocations SET state='refused' WHERE id=$1 RETURNING id", [req.params.id]);
-  if (!row) return res.status(404).json({ error: 'Not found' });
   const full = await one(`${ALLOC_SQL} WHERE a.id = $1`, [row.id]);
   res.json({ data: full });
 }));
 
 allocations.delete('/:id', can('allocations', 'write'), ah(async (req, res) => {
+  const existing = await one('SELECT employee_id FROM allocations WHERE id = $1', [req.params.id]);
+  if (existing) {
+    const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+    if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
+  }
   await query('DELETE FROM allocations WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));
@@ -461,7 +475,11 @@ requests.post('/', can('timeoff', 'write'), ah(async (req, res) => {
   if (!canSeeEmployee(req, employee_id, 'timeoff', 'write')) {
     return res.status(403).json({ error: 'You can only book time off for yourself' });
   }
+
+  const blockedPriv = await blockPrivilegedManagement(req, employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
   if (!type_id) return res.status(400).json({ error: 'Time off type is required' });
+
   if (!date_from || !date_to) return res.status(400).json({ error: 'Date from and date to are required' });
   if (date_to < date_from) return res.status(400).json({ error: 'Date to must be on or after date from' });
 
@@ -563,6 +581,8 @@ requests.post('/:id/approve', can('timeoff_approve', 'write'), ah(async (req, re
   const out = await tx(async (c) => {
     const { rows: [r] } = await c.query('SELECT * FROM time_off_requests WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!r) return { status: 404, body: { error: 'Not found' } };
+    const blockedPriv = await blockPrivilegedManagement(req, r.employee_id, 'HR');
+    if (blockedPriv) return { status: blockedPriv.status, body: blockedPriv.body };
     await c.query('SELECT id FROM employees WHERE id = $1 FOR UPDATE', [r.employee_id]);
 
     if (r.state === 'approved') return { status: 400, body: { error: 'Already approved' } };
@@ -645,6 +665,21 @@ requests.post('/:id/cancel', can('timeoff', 'write'), ah(async (req, res) => {
 }));
 
 requests.delete('/:id', can('timeoff_approve', 'write'), ah(async (req, res) => {
+  const existing = await one('SELECT employee_id FROM time_off_requests WHERE id = $1', [req.params.id]);
+  if (existing) {
+    const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+    if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
+  }
   await query('DELETE FROM time_off_requests WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));
+
+
+
+
+
+
+
+
+
+

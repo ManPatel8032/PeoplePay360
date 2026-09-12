@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { query, one } from '../db.js';
 import { can } from '../auth.js';
 import { ah } from '../lib/crud.js';
-import { blockPayrollStaffPay, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
+import { blockPayrollStaffPay, rejected, employeeScopeFilter, canSeeEmployee , blockPrivilegedManagement } from '../lib/guards.js';
 
 export const contracts = Router();
 
@@ -104,6 +104,9 @@ contracts.post('/', can('contracts', 'write'), ah(async (req, res) => {
 
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
 
+  const blockedPriv = await blockPrivilegedManagement(req, employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
+
   if (!canSeeEmployee(req, employee_id, 'contracts', 'write')) {
     return res.status(403).json({ error: 'Cannot create contract for an employee outside your team' });
   }
@@ -160,6 +163,9 @@ contracts.post('/', can('contracts', 'write'), ah(async (req, res) => {
 contracts.patch('/:id', can('contracts', 'write'), ah(async (req, res) => {
   const existing = await one('SELECT * FROM contracts WHERE id = $1', [req.params.id]);
   if (!existing) return res.status(404).json({ error: 'Not found' });
+
+  const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
 
   if (!canSeeEmployee(req, existing.employee_id, 'contracts', 'write')) {
     return res.status(403).json({ error: 'This contract is outside your team' });
@@ -232,6 +238,9 @@ contracts.delete('/:id', can('contracts', 'delete'), ah(async (req, res) => {
   const contract = await one('SELECT id, name, employee_id FROM contracts WHERE id = $1', [req.params.id]);
   if (!contract) return res.status(404).json({ error: 'Contract not found' });
 
+  const blockedPriv = await blockPrivilegedManagement(req, contract.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
+
   if (!canSeeEmployee(req, contract.employee_id, 'contracts')) {
     return res.status(403).json({ error: 'This contract is outside your team' });
   }
@@ -251,3 +260,6 @@ contracts.post('/:id/check-overlap', can('contracts', 'read'), ah(async (req, re
   const overlapping = await findOverlappingContracts(c.employee_id, c.start_date, c.end_date, c.id);
   res.json({ data: { overlapping } });
 }));
+
+
+

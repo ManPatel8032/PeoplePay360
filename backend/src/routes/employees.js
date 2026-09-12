@@ -3,7 +3,7 @@ import { query, one } from '../db.js';
 import { can } from '../auth.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { contractForPeriod } from '../lib/payroll.js';
-import { employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
+import { employeeScopeFilter, canSeeEmployee, blockPrivilegedManagement } from '../lib/guards.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^(\+91[\s-]?)?[0-9]{10}$/;
@@ -62,7 +62,11 @@ export const employees = crudRouter({
   orderBy: 'e.name ASC',
   hooks: {
     beforeCreate: (req) => validateEmployee(req.body, true),
-    beforeUpdate: (req) => validateEmployee(req.body, false),
+    beforeUpdate: async (req) => {
+      const blockedPriv = await blockPrivilegedManagement(req, req.params.id, 'HR');
+      if (blockedPriv) return { status: blockedPriv.status, error: blockedPriv.body.error };
+      return validateEmployee(req.body, false);
+    },
     afterUpdate: async (_req, row) => {
       if (row.work_email) {
         await query('UPDATE users SET email = $1 WHERE employee_id = $2', [row.work_email, row.id]);
@@ -75,6 +79,8 @@ export const employees = crudRouter({
      * allocations) are deleted via CASCADE, and manager links are unlinked.
      */
     beforeDelete: async (req) => {
+      const blockedPriv = await blockPrivilegedManagement(req, req.params.id, 'HR');
+      if (blockedPriv) return { status: blockedPriv.status, error: blockedPriv.body.error };
       // 1. Clear manager links on any direct reports
       await query('UPDATE employees SET manager_id = NULL WHERE manager_id = $1', [req.params.id]);
 
@@ -148,3 +154,6 @@ export const positions = crudRouter({
   table: 'job_positions', module: 'employees', columns: ['name', 'department_id'], orderBy: 'name',
   filters: { department_id: 'job_positions.department_id' },
 });
+
+
+

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
 import { can } from '../auth.js';
-import { employeeScopeFilter, canSeeEmployee, isAdmin, blockPayrollCreation, ROLE_HIERARCHY } from '../lib/guards.js';
+import { employeeScopeFilter, canSeeEmployee, isAdmin, blockPrivilegedManagement, ROLE_HIERARCHY } from '../lib/guards.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { computePayslip, getPayslip, contractForPeriod, periodStats } from '../lib/payroll.js';
 import { validateFormula } from '../lib/formula.js';
@@ -223,7 +223,7 @@ payruns.post('/wizard', can('payruns', 'write'), ah(async (req, res) => {
   // Hierarchy and Self-Payroll Guard
   if (!isAdmin(req)) {
     for (const empId of employee_ids) {
-      const blocked = await blockPayrollCreation(req, empId);
+      const blocked = await blockPrivilegedManagement(req, empId);
       if (blocked) {
         return res.status(blocked.status).json(blocked.body);
       }
@@ -304,7 +304,7 @@ payruns.post('/:id/compute', can('payruns', 'write'), ah(async (req, res) => {
   if (!isAdmin(req)) {
     const slips = await query("SELECT employee_id FROM payslips WHERE payrun_id = $1 AND state <> 'cancelled'", [run.id]);
     for (const s of slips) {
-      const blocked = await blockPayrollCreation(req, s.employee_id);
+      const blocked = await blockPrivilegedManagement(req, s.employee_id);
       if (blocked) {
         return res.status(blocked.status).json({
           error: `Cannot compute payrun: ${blocked.body.error}`,
@@ -333,7 +333,7 @@ payruns.post('/:id/validate', can('payruns', 'write'), ah(async (req, res) => {
 
   if (!isAdmin(req)) {
     for (const p of run.payslips) {
-      const blocked = await blockPayrollCreation(req, p.employee_id);
+      const blocked = await blockPrivilegedManagement(req, p.employee_id);
       if (blocked) {
         return res.status(blocked.status).json({
           error: `Cannot validate payrun: ${blocked.body.error}`,
@@ -379,7 +379,7 @@ payruns.post('/:id/mark-paid', can('payruns', 'write'), ah(async (req, res) => {
   if (!isAdmin(req)) {
     const slips = await query("SELECT employee_id FROM payslips WHERE payrun_id = $1 AND state <> 'cancelled'", [run.id]);
     for (const s of slips) {
-      const blocked = await blockPayrollCreation(req, s.employee_id);
+      const blocked = await blockPrivilegedManagement(req, s.employee_id);
       if (blocked) {
         return res.status(blocked.status).json({
           error: `Cannot mark payrun paid: ${blocked.body.error}`,
@@ -463,7 +463,7 @@ payslips.post('/:id/compute', can('payslips', 'write'), ah(async (req, res) => {
   if (!slip) return res.status(404).json({ error: 'Not found' });
 
   if (!isAdmin(req)) {
-    const blocked = await blockPayrollCreation(req, slip.employee_id);
+    const blocked = await blockPrivilegedManagement(req, slip.employee_id);
     if (blocked) return res.status(blocked.status).json(blocked.body);
   }
 

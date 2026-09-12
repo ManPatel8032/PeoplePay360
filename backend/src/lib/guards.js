@@ -143,25 +143,29 @@ export const ROLE_HIERARCHY = {
 };
 
 /**
- * Rule 3 — Hierarchy & Self-Payroll restriction.
- * An employee (even if payroll_user or payroll_manager) cannot create or run their own payroll.
- * Their payroll must be processed by an Admin (or strictly higher in hierarchy:
- * employee -> hr -> payroll_user -> payroll_manager -> admin).
+ * Rule 3 — Hierarchy & Self-Management restriction for Privileged Users.
+ * A privileged user (HR Manager, Payroll User, Payroll Manager) cannot create or manage their own records.
+ * Their records must be processed by a higher role in the hierarchy or an Admin.
+ * (employee -> hr_manager -> payroll_user -> payroll_manager -> admin)
  */
-export async function blockPayrollCreation(req, targetEmployeeId) {
+export async function blockPrivilegedManagement(req, targetEmployeeId, recordType = 'payroll') {
   if (isAdmin(req)) return null;
 
   const callerEmpId = req.user?.employee_id;
   const callerRole = req.user?.role || 'employee';
+
+  // Ordinary employees can manage their own records where permitted (e.g., Attendance, Time Off)
+  if (callerRole === 'employee') return null;
+
   const callerRank = ROLE_HIERARCHY[callerRole] || 1;
 
-  // 1. Self-payroll restriction
+  // 1. Self-management restriction for privileged users
   if (callerEmpId && Number(targetEmployeeId) === Number(callerEmpId)) {
     return {
       status: 403,
       body: {
-        error: 'You cannot create or process your own payroll. Your payroll must be processed by an Admin.',
-        rule: 'self_payroll_forbidden',
+        error: `You cannot create, update, or manage your own ${recordType} records. They must be handled by a higher role or Admin.`,
+        rule: 'self_management_forbidden',
       },
     };
   }
@@ -181,8 +185,8 @@ export async function blockPayrollCreation(req, targetEmployeeId) {
       return {
         status: 403,
         body: {
-          error: `${empName} is a Payroll Manager. Their payroll must be processed by an Admin.`,
-          rule: 'payroll_hierarchy_restriction',
+          error: `${empName} is a Payroll Manager. Their ${recordType} records must be handled by an Admin.`,
+          rule: 'hierarchy_restriction',
         },
       };
     }
@@ -190,16 +194,25 @@ export async function blockPayrollCreation(req, targetEmployeeId) {
       return {
         status: 403,
         body: {
-          error: `${empName} is a Payroll User. Their payroll must be processed by a Payroll Manager or Admin.`,
-          rule: 'payroll_hierarchy_restriction',
+          error: `${empName} is a Payroll User. Their ${recordType} records must be handled by a Payroll Manager or Admin.`,
+          rule: 'hierarchy_restriction',
+        },
+      };
+    }
+    if (targetRole === 'hr_manager') {
+      return {
+        status: 403,
+        body: {
+          error: `${empName} is an HR Manager. Their ${recordType} records must be handled by a Payroll User, Payroll Manager, or Admin.`,
+          rule: 'hierarchy_restriction',
         },
       };
     }
     return {
       status: 403,
       body: {
-        error: `You cannot process payroll for ${empName} (${targetRole.replace('_', ' ')}). It must be processed by a higher authority or Admin.`,
-        rule: 'payroll_hierarchy_restriction',
+        error: `You cannot manage ${recordType} records for ${empName} (${targetRole.replace('_', ' ')}). It must be processed by a higher authority or Admin.`,
+        rule: 'hierarchy_restriction',
       },
     };
   }

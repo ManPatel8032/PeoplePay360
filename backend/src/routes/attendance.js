@@ -4,9 +4,10 @@ import { query, one } from '../db.js';
 import { can, scope } from '../auth.js';
 import { ah } from '../lib/crud.js';
 import { hoursBetween } from '../lib/dates.js';
-import { blockManagerAttendance, rejected, employeeScopeFilter, canSeeEmployee } from '../lib/guards.js';
+import { blockManagerAttendance, rejected, employeeScopeFilter, canSeeEmployee, blockPrivilegedManagement } from '../lib/guards.js';
 
 export const attendance = Router();
+
 
 /**
  * Whose attendance may this caller write?
@@ -255,6 +256,9 @@ attendance.post('/check-in', can('attendance', 'write'), ah(async (req, res) => 
   }
   const employeeId = selfId;
 
+  const blocked = await blockPrivilegedManagement(req, employeeId, 'HR');
+  if (blocked) return res.status(blocked.status).json(blocked.body);
+
   // Auto-close any stale unclosed attendance records from prior days (> 16 hours ago)
   await query(
     `UPDATE attendance
@@ -312,6 +316,9 @@ attendance.post('/check-out', can('attendance', 'write'), ah(async (req, res) =>
   }
   const employeeId = selfId;
 
+  const blocked = await blockPrivilegedManagement(req, employeeId, 'HR');
+  if (blocked) return res.status(blocked.status).json(blocked.body);
+
   const open = await one(
     'SELECT * FROM attendance WHERE employee_id = $1 AND check_out IS NULL ORDER BY check_in DESC LIMIT 1',
     [employeeId]
@@ -348,6 +355,9 @@ attendance.post('/:id/check-out', can('attendance', 'write'), ah(async (req, res
   }
 
   if (rejected(res, await blockManagerAttendance(req, row.employee_id))) return;
+
+  const blockedPriv = await blockPrivilegedManagement(req, row.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
 
   // Calculate check_out time: if historical missed check-out (> 16 hours), cap to 8h shift
   let checkOutTime = req.body.check_out;
@@ -388,6 +398,21 @@ attendance.post('/close-missed-checkouts', can('attendance', 'write'), ah(async 
 
   const scopeSql = employeeScopeFilter(req, 'employee_id', params, 'attendance');
   if (scopeSql) where.push(scopeSql);
+
+  // Privileged users cannot manage themselves or equal/higher ranks
+  const callerRole = req.user?.role || 'employee';
+  if (callerRole !== 'employee' && callerRole !== 'admin') {
+    const callerEmpId = req.user?.employee_id;
+    if (callerEmpId) {
+      where.push(`employee_id != ${Number(callerEmpId)}`);
+    }
+    const higherRoles = ['admin'];
+    if (callerRole === 'hr_manager') higherRoles.push('hr_manager', 'payroll_user', 'payroll_manager');
+    if (callerRole === 'payroll_user') higherRoles.push('payroll_user', 'payroll_manager');
+    if (callerRole === 'payroll_manager') higherRoles.push('payroll_manager');
+    
+    where.push(`employee_id NOT IN (SELECT employee_id FROM users WHERE role IN ('${higherRoles.join("', '")}') AND employee_id IS NOT NULL)`);
+  }
 
   // Managers' attendance requires admin review
   if (req.user?.role !== 'admin') {
@@ -431,6 +456,9 @@ attendance.post('/', can('attendance', 'write'), ah(async (req, res) => {
   }
   if (employee_id !== req.user?.employee_id) {
     if (rejected(res, await blockManagerAttendance(req, employee_id))) return;
+
+  const blockedPriv = await blockPrivilegedManagement(req, employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
   }
 
   if (!employee_id) return res.status(400).json({ error: 'Employee is required' });
@@ -477,6 +505,9 @@ attendance.patch('/:id', can('attendance', 'write'), ah(async (req, res) => {
   // A manager's own attendance is reviewed by an Admin only. Checked before the
   // scoping rules below, since it overrides them for every non-admin caller.
   if (rejected(res, await blockManagerAttendance(req, existing.employee_id))) return;
+
+  const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
 
   if (!canSeeEmployee(req, existing.employee_id, 'attendance')) {
     return res.status(403).json({ error: 'Cannot edit attendance for another employee' });
@@ -531,6 +562,9 @@ attendance.delete('/:id', can('attendance', 'delete'), ah(async (req, res) => {
   // Admin-only rule for managers applies here too.
   if (rejected(res, await blockManagerAttendance(req, existing.employee_id))) return;
 
+  const blockedPriv = await blockPrivilegedManagement(req, existing.employee_id, 'HR');
+  if (blockedPriv) return res.status(blockedPriv.status).json(blockedPriv.body);
+
   if (!canSeeEmployee(req, existing.employee_id, 'attendance')) {
     return res.status(403).json({ error: 'Cannot delete attendance for another employee' });
   }
@@ -538,3 +572,6 @@ attendance.delete('/:id', can('attendance', 'delete'), ah(async (req, res) => {
   await query('DELETE FROM attendance WHERE id = $1', [req.params.id]);
   res.status(204).end();
 }));
+
+
+

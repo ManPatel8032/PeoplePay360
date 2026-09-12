@@ -25,22 +25,28 @@ const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDig
 
 export async function sendPayslipMail(slip, pdfBuffer) {
   const filename = `payslip-${slip.employee_name.replace(/\W+/g, '-')}-${slip.period_start}.pdf`;
+  const targetRecipient = process.env.MAIL_REDIRECT_TO || slip.work_email;
+  const isRedirected = Boolean(process.env.MAIL_REDIRECT_TO && process.env.MAIL_REDIRECT_TO !== slip.work_email);
+  const subject = isRedirected
+    ? `[Payslip: ${slip.employee_name}] ${slip.period_start} to ${slip.period_end}`
+    : `Payslip — ${slip.period_start} to ${slip.period_end}`;
+
   const message = {
     from: process.env.MAIL_FROM || 'payroll@peoplepay360.local',
-    to: slip.work_email,
-    subject: `Payslip — ${slip.period_start} to ${slip.period_end}`,
-    text: `Hi ${slip.employee_name},\n\nYour payslip for ${slip.period_start} – ${slip.period_end} is attached.\nNet payable: ${money(slip.net)}\n\n— PeoplePay360 Payroll`,
+    to: targetRecipient,
+    subject,
+    text: `Hi ${slip.employee_name},\n\nYour payslip for ${slip.period_start} – ${slip.period_end} is attached.\nNet payable: ${money(slip.net)}${isRedirected ? `\n\n(Original recipient: ${slip.work_email})` : ''}\n\n— PeoplePay360 Payroll`,
     attachments: [{ filename, content: pdfBuffer }],
   };
 
   if (transport) {
     const info = await transport.sendMail(message);
-    return { mode: 'smtp', to: slip.work_email, messageId: info.messageId };
+    return { mode: 'smtp', to: targetRecipient, originalTo: slip.work_email, messageId: info.messageId };
   }
 
   fs.mkdirSync(OUTBOX, { recursive: true });
   const file = path.join(OUTBOX, filename);
   fs.writeFileSync(file, pdfBuffer);
-  console.log(`[mail:outbox] ${slip.work_email} <- ${filename}`);
-  return { mode: 'outbox', to: slip.work_email, file };
+  console.log(`[mail:outbox] ${targetRecipient} <- ${filename}`);
+  return { mode: 'outbox', to: targetRecipient, file };
 }
