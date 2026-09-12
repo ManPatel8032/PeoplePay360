@@ -403,11 +403,18 @@ export async function computePayslip(payslipId) {
 
   await tx(async (c) => {
     await c.query('DELETE FROM payslip_lines WHERE payslip_id = $1', [slip.id]);
-    for (const l of lines) {
+    if (lines.length > 0) {
+      const placeholders = [];
+      const values = [];
+      lines.forEach((l, idx) => {
+        const o = idx * 7;
+        placeholders.push(`($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7})`);
+        values.push(slip.id, l.rule_id ?? null, l.code, l.name, l.category, l.sequence, l.amount);
+      });
       await c.query(
         `INSERT INTO payslip_lines (payslip_id, rule_id, code, name, category, sequence, amount)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [slip.id, l.rule_id ?? null, l.code, l.name, l.category, l.sequence, l.amount]
+         VALUES ${placeholders.join(', ')}`,
+        values
       );
     }
     await c.query(

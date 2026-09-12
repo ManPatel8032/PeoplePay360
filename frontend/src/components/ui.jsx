@@ -9,20 +9,28 @@ export function useApi(fetcher, deps = []) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const hasDataRef = useRef(false);
 
-  const reload = useCallback(() => {
+  const reload = useCallback((silent = false) => {
     let alive = true;
-    setLoading(true);
+    if (!silent && !hasDataRef.current) {
+      setLoading(true);
+    }
     setError(null);
     Promise.resolve(fetcher())
-      .then((d) => alive && setData(d))
+      .then((d) => {
+        if (alive) {
+          setData(d);
+          hasDataRef.current = true;
+        }
+      })
       .catch((e) => alive && setError(e))
       .finally(() => alive && setLoading(false));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  useEffect(() => reload(), [reload]);
+  useEffect(() => reload(hasDataRef.current), [reload]);
   return { data, loading, error, reload, setData };
 }
 

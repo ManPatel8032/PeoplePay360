@@ -1,6 +1,7 @@
 /** Salary structures & rules, Payrun wizard, Payslips, PDF, bulk email (A5, A6, B5-B8). */
 import { Router } from 'express';
 import { query, one, tx } from '../db.js';
+import { can } from '../auth.js';
 import { employeeScopeFilter, canSeeEmployee, isAdmin, blockPayrollCreation, ROLE_HIERARCHY } from '../lib/guards.js';
 import { crudRouter, ah } from '../lib/crud.js';
 import { computePayslip, getPayslip, contractForPeriod, periodStats } from '../lib/payroll.js';
@@ -313,7 +314,11 @@ payruns.post('/:id/compute', can('payruns', 'write'), ah(async (req, res) => {
   }
 
   const slips = await query('SELECT id FROM payslips WHERE payrun_id = $1', [run.id]);
-  for (const s of slips) await computePayslip(s.id);
+  const CHUNK_SIZE = 5;
+  for (let i = 0; i < slips.length; i += CHUNK_SIZE) {
+    const chunk = slips.slice(i, i + CHUNK_SIZE);
+    await Promise.all(chunk.map((s) => computePayslip(s.id)));
+  }
   await query("UPDATE payruns SET state='computed' WHERE id=$1", [run.id]);
   res.json({ data: await payrunDetail(run.id) });
 }));
@@ -343,10 +348,11 @@ payruns.post('/:id/validate', can('payruns', 'write'), ah(async (req, res) => {
 
   // If there are blocking warnings, recompute those slips to check if external fixes (e.g. bank details) resolved them
   if (blocking.length) {
-    for (const p of run.payslips) {
-      if ((p.warnings || []).some((w) => w.level === 'error')) {
-        await computePayslip(p.id);
-      }
+    const errorSlips = run.payslips.filter((p) => (p.warnings || []).some((w) => w.level === 'error'));
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < errorSlips.length; i += CHUNK_SIZE) {
+      const chunk = errorSlips.slice(i, i + CHUNK_SIZE);
+      await Promise.all(chunk.map((p) => computePayslip(p.id)));
     }
     const refreshed = await payrunDetail(run.id);
     run.payslips = refreshed.payslips;
@@ -480,9 +486,14 @@ payslips.post('/:id/send', can('payslips', 'write'), ah(async (req, res) => {
   const slip = await getPayslip(req.params.id);
   if (!slip) return res.status(404).json({ error: 'Not found' });
   if (!slip.work_email) return res.status(400).json({ error: 'Employee has no work email' });
-  const info = await sendPayslipMail(slip, await renderPayslipPdf(slip));
-  await query('UPDATE payslips SET sent_at = now() WHERE id = $1', [slip.id]);
-  res.json({ data: info });
+  try {
+    const info = await sendPayslipMail(slip, await renderPayslipPdf(slip));
+    await query('UPDATE payslips SET sent_at = now() WHERE id = $1', [slip.id]);
+    res.json({ data: info });
+  } catch (err) {
+    console.error('[mail:error]', err);
+    res.status(502).json({ error: `Email failed: ${err.message}` });
+  }
 }));
 
 payslips.delete('/:id', can('payslips', 'delete'), ah(async (req, res) => {

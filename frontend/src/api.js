@@ -85,11 +85,51 @@ async function request(method, path, body) {
   return json.data !== undefined ? json.data : json;
 }
 
+const apiCache = new Map();
+
+export function clearApiCache(prefix = '') {
+  if (!prefix) {
+    apiCache.clear();
+  } else {
+    for (const key of apiCache.keys()) {
+      if (key.startsWith(prefix)) apiCache.delete(key);
+    }
+  }
+}
+
 export const api = {
-  get:   (p) => request('GET', p),
-  post:  (p, b) => request('POST', p, b ?? {}),
-  patch: (p, b) => request('PATCH', p, b),
-  del:   (p) => request('DELETE', p),
+  get: (p, options = {}) => {
+    const cached = apiCache.get(p);
+    const now = Date.now();
+    // Serve from cache if younger than 60 seconds
+    if (cached && !options.skipCache && (now - cached.timestamp < 60000)) {
+      // Background revalidation if older than 4 seconds
+      if (now - cached.timestamp > 4000) {
+        request('GET', p)
+          .then((fresh) => apiCache.set(p, { data: fresh, timestamp: Date.now() }))
+          .catch(() => {});
+      }
+      return Promise.resolve(cached.data);
+    }
+    return request('GET', p).then((data) => {
+      apiCache.set(p, { data, timestamp: Date.now() });
+      return data;
+    });
+  },
+  peek: (p) => apiCache.get(p)?.data,
+  invalidate: (prefix) => clearApiCache(prefix),
+  post: async (p, b) => {
+    clearApiCache();
+    return request('POST', p, b ?? {});
+  },
+  patch: async (p, b) => {
+    clearApiCache();
+    return request('PATCH', p, b);
+  },
+  del: async (p) => {
+    clearApiCache();
+    return request('DELETE', p);
+  },
 };
 
 /**

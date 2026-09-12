@@ -363,10 +363,21 @@ async function main() {
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
   }
-  await tx(async (c) => {
-    for (const r of attRows)
-      await c.query('INSERT INTO attendance (employee_id,check_in,check_out,status,manual_edit) VALUES ($1,$2,$3,$4,$5)', r);
-  });
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < attRows.length; i += BATCH_SIZE) {
+    const chunk = attRows.slice(i, i + BATCH_SIZE);
+    const placeholders = [];
+    const values = [];
+    chunk.forEach((row, idx) => {
+      const o = idx * 5;
+      placeholders.push(`($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`);
+      values.push(...row);
+    });
+    await pool.query(
+      `INSERT INTO attendance (employee_id, check_in, check_out, status, manual_edit) VALUES ${placeholders.join(', ')}`,
+      values
+    );
+  }
   console.log(`  ${attRows.length} attendance records`);
 
   // ---------- time off requests ----------

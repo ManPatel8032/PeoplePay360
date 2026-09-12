@@ -14,10 +14,25 @@ types.setTypeParser(1184, (v) => new Date(v).toISOString());        // TIMESTAMP
 types.setTypeParser(1700, (v) => (v === null ? null : parseFloat(v))); // NUMERIC
 types.setTypeParser(20, (v) => (v === null ? null : parseInt(v, 10))); // BIGINT (count())
 
+const connectionString =
+  process.env.DATABASE_URL || 'postgres://pp360:pp360@localhost:5433/peoplepay360';
+
+const isSsl =
+  process.env.PGSSL === 'true' ||
+  connectionString.includes('sslmode=require') ||
+  connectionString.includes('ssl=true') ||
+  connectionString.includes('neon.tech');
+
 export const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL || 'postgres://pp360:pp360@localhost:5433/peoplepay360',
+  connectionString,
+  ssl: isSsl ? { rejectUnauthorized: false } : undefined,
   max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+
+pool.on('error', (err) => {
+  console.warn('[db pool] Idle client error:', err.message);
 });
 
 /** Run a query. Returns rows. */
@@ -47,14 +62,19 @@ export async function migrate() {
 }
 
 export async function waitForDb(retries = 30) {
+  let lastError = null;
   for (let i = 0; i < retries; i++) {
     try {
       await pool.query('SELECT 1');
       return;
-    } catch {
-      if (i === 0) console.log('waiting for postgres...');
+    } catch (err) {
+      lastError = err;
+      if (i === 0) console.log('waiting for database connection...');
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
-  throw new Error('Could not connect to Postgres. Is `docker compose up -d db` running?');
+  const hint = connectionString.includes('neon.tech')
+    ? 'Check your Neon connection string, credentials, and internet connection.'
+    : 'Is `docker compose up -d db` running?';
+  throw new Error(`Could not connect to database (${lastError?.message || 'unknown error'}). ${hint}`);
 }
