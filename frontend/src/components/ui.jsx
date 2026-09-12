@@ -31,6 +31,15 @@ export function useApi(fetcher, deps = []) {
   }, deps);
 
   useEffect(() => reload(hasDataRef.current), [reload]);
+
+  useEffect(() => {
+    const onCacheUpdate = () => {
+      reload(true);
+    };
+    window.addEventListener('api-cache-updated', onCacheUpdate);
+    return () => window.removeEventListener('api-cache-updated', onCacheUpdate);
+  }, [reload]);
+
   return { data, loading, error, reload, setData };
 }
 

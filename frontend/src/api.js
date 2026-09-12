@@ -106,13 +106,17 @@ export const api = {
       // Background revalidation if older than 4 seconds
       if (now - cached.timestamp > 4000) {
         request('GET', p)
-          .then((fresh) => apiCache.set(p, { data: fresh, timestamp: Date.now() }))
+          .then((fresh) => {
+            apiCache.set(p, { data: fresh, timestamp: Date.now() });
+            window.dispatchEvent(new CustomEvent('api-cache-updated', { detail: { path: p, data: fresh } }));
+          })
           .catch(() => {});
       }
       return Promise.resolve(cached.data);
     }
     return request('GET', p).then((data) => {
       apiCache.set(p, { data, timestamp: Date.now() });
+      window.dispatchEvent(new CustomEvent('api-cache-updated', { detail: { path: p, data } }));
       return data;
     });
   },

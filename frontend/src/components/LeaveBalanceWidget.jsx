@@ -15,20 +15,37 @@ export default function LeaveBalanceWidget({ employeeId, selectedTypeId, onSelec
       setBalances([]);
       return;
     }
-    let alive = true;
-    setLoading(true);
-    setError(null);
-    api.get(`/time-off/requests/balances/${employeeId}`)
-      .then((data) => {
-        if (alive) setBalances(data || []);
-      })
-      .catch((err) => {
-        if (alive) setError(err);
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => { alive = false; };
+    
+    const fetchBalances = (silent = false) => {
+      let alive = true;
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
+      api.get(`/time-off/requests/balances/${employeeId}`)
+        .then((data) => {
+          if (alive) setBalances(data || []);
+        })
+        .catch((err) => {
+          if (alive) setError(err);
+        })
+        .finally(() => {
+          if (alive && !silent) setLoading(false);
+        });
+      return () => { alive = false; };
+    };
+
+    const cleanupFetch = fetchBalances(false);
+
+    const onCacheUpdate = () => {
+      fetchBalances(true);
+    };
+    window.addEventListener('api-cache-updated', onCacheUpdate);
+
+    return () => {
+      cleanupFetch();
+      window.removeEventListener('api-cache-updated', onCacheUpdate);
+    };
   }, [employeeId]);
 
   if (!employeeId) return null;
