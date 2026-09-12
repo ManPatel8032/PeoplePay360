@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: peoplepay360-api
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm run seed && npm start
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_huSWLwF8Dop3@ep-rapid-thunder-b3i6n9pg-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NODE_ENV
+        value: production
+      - key: ALLOW_DEV_AUTH
+        value: "0"
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        value: genaihthon@gmail.com
+      - key: SMTP_PASS
+        value: iqtk ygfz rfme wpot
+      - key: MAIL_FROM
+        value: "PeoplePay360 Payroll <genaihthon@gmail.com>"
+      - key: MAIL_REDIRECT_TO
+        value: genaihthon@gmail.com
